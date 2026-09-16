@@ -1,0 +1,309 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'">
+<link rel="stylesheet" href="vendor/xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #121215; }
+  /* Panel ayracı: panolar arasında 1 px boşluk bırakıyoruz, altından host görünüyor. */
+  #host { position: absolute; inset: 0; background: #31313a; }
+  /* Her oturum kendi katmanında. Gizlemek için display:none DEĞİL visibility
+     kullanıyoruz: display:none eleman boyutunu sıfırlar, o zaman ne term.open()
+     doğru kurulur ne de fit() ölçebilir (UI.md D2). visibility:hidden ölçüyü korur. */
+  .pane {
+    position: absolute; top: 0; bottom: 0; left: 0; width: 100%;
+    padding: 6px 8px; box-sizing: border-box; background: #121215;
+    /* Sürüklerken panolar yer açıyor; geçiş olmadan sıçrayarak yerleşirlerdi.
+       Eğri yavaş biten bir expo-out: hareket sonunda yumuşuyor. */
+    transition: left .3s cubic-bezier(.16,1,.3,1), width .3s cubic-bezier(.16,1,.3,1);
+  }
+  /* Açılan boşluğun yerini gösteren tutucu. Panolardan SONRA ekleniyor ve
+     z-index taşıyor: aksi halde terminaller üstünü kapatıyordu. */
+  #gap {
+    position: absolute; top: 0; bottom: 0; z-index: 5;
+    padding: 6px; box-sizing: border-box;
+    opacity: 0; pointer-events: none;
+    transition: left .3s cubic-bezier(.16,1,.3,1),
+                width .3s cubic-bezier(.16,1,.3,1), opacity .2s ease;
+  }
+  #gap > i {
+    display: block; width: 100%; height: 100%;
+    border-radius: 8px;
+    border: 1px dashed #4a4a57;
+    background: rgba(255,255,255,.045);
+  }
+  #gap[data-on="1"] { opacity: 1; }
+  /* Panel tavanındayken hedef panelin sakin vurgusu — mavi kaplama değil,
+     yalnızca kenar. */
+  .pane[data-target="1"]::after {
+    content: ""; position: absolute; inset: 6px;
+    border-radius: 8px; border: 1px solid #6a6a77;
+    background: rgba(255,255,255,.04); pointer-events: none;
+  }
+  .pane[data-active="0"] { visibility: hidden; }
+  .xterm-viewport::-webkit-scrollbar { width: 9px; }
+  .xterm-viewport::-webkit-scrollbar-thumb { background: #31313a; border-radius: 5px; }
+  .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<script src="vendor/addon-search.js"></script>
+<script src="vendor/addon-webgl.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  const host = document.getElementById("host");
+  const panes = new Map();   // id -> { term, fit, search, el, webgl, cols, rows }
+  let activeID = null;
+  let layout = [null];       // görünür slotlardaki oturum kimlikleri
+  let gapIndex = null;       // sürükleme sırasında açılan boşluğun yeri
+  let settleTimer = 0;       // geçiş bittikten sonraki yeniden ölçüm
+
+  // Tutucu panolardan sonra eklenir ki üstlerinde kalsın.
+  const gap = document.createElement("div");
+  gap.id = "gap";
+  gap.dataset.on = "0";
+  gap.appendChild(document.createElement("i"));
+  host.appendChild(gap);
+
+  const send = (name, body) => {
+    const h = window.webkit && window.webkit.messageHandlers;
+    if (h && h[name]) h[name].postMessage(body);
+  };
+
+  const encoder = new TextEncoder();
+  const toB64 = (bytes) => {
+    let s = "";
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  };
+  const fromB64 = (b64) => {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+
+  const OPTIONS = {
+    fontFamily: '"SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize: 12.5,
+    lineHeight: 1.35,
+    cursorBlink: true,
+    scrollback: 10000,
+    macOptionIsMeta: true,
+    allowProposedApi: true,
+    // "Center Ajan Konsolu" mockup'ının terminal paleti.
+    theme: {
+      background: '#121215', foreground: '#e6e6ea',
+      cursor: '#7aa7ff', cursorAccent: '#121215',
+      selectionBackground: '#2f3040',
+      black: '#121215',   red: '#ef6a5e',   green: '#6fcf97', yellow: '#e8b04a',
+      blue: '#7aa7ff',    magenta: '#c99bf5', cyan: '#6fd3cf', white: '#e6e6ea',
+      brightBlack: '#6e6e7c', brightRed: '#ff8a7e', brightGreen: '#8fe0b3',
+      brightYellow: '#f5c76a', brightBlue: '#9dbcff', brightMagenta: '#dcb6ff',
+      brightCyan: '#8fe3df', brightWhite: '#ffffff'
+    }
+  };
+
+  // WebGL bağlamı tarayıcı başına sınırlı (~16). Her oturuma bir tane açarsak
+  // tükenir; bu yüzden yalnızca görünür olana veriyoruz, geçişte devrediyoruz.
+  function attachWebgl(rec) {
+    if (rec.webgl) return;
+    try {
+      const w = new WebglAddon.WebglAddon();
+      w.onContextLoss(() => { w.dispose(); rec.webgl = null; });
+      rec.term.loadAddon(w);
+      rec.webgl = w;
+    } catch (e) { rec.webgl = null; }
+  }
+  function detachWebgl(rec) {
+    if (!rec.webgl) return;
+    try { rec.webgl.dispose(); } catch (e) {}
+    rec.webgl = null;
+  }
+
+  function reportSize(id, rec) {
+    if (rec.term.cols === rec.cols && rec.term.rows === rec.rows) return false;
+    rec.cols = rec.term.cols;
+    rec.rows = rec.term.rows;
+    send("resize", { id: id, cols: rec.cols, rows: rec.rows });
+    return true;
+  }
+
+  // ---- Swift → JS ----
+
+  window.reeveCreate = function (id) {
+    if (panes.has(id)) return;
+
+    const el = document.createElement("div");
+    el.className = "pane";
+    el.dataset.active = "0";
+    box(el, 0, 100 / Math.max(layout.length, 1));   // gizli pano da ölçülebilir olmalı
+    host.appendChild(el);
+
+    const term = new Terminal(OPTIONS);
+    const fit = new FitAddon.FitAddon();
+    const search = new SearchAddon.SearchAddon();
+    term.loadAddon(fit);
+    term.loadAddon(search);
+    term.open(el);                       // eleman ölçülebilir: gizliyken de boyutu var
+
+    el.addEventListener("mousedown", () => send("focusPane", { id: id }), true);
+    term.onData(d => send("input", { id: id, b64: toB64(encoder.encode(d)) }));
+    term.onBinary(d => {
+      const u = new Uint8Array(d.length);
+      for (let i = 0; i < d.length; i++) u[i] = d.charCodeAt(i) & 0xff;
+      send("input", { id: id, b64: toB64(u) });
+    });
+
+    const rec = { term: term, fit: fit, search: search, el: el,
+                  webgl: null, cols: 0, rows: 0 };
+    panes.set(id, rec);
+
+    fit.fit();
+    rec.cols = term.cols;
+    rec.rows = term.rows;
+    send("created", { id: id, cols: rec.cols, rows: rec.rows });
+  };
+
+  // ---- panel yerleşimi ----
+  // Panolar DOM'da taşınmıyor, sadece left/width değişiyor: canvas'ı yeniden
+  // bağlamak WebGL bağlamını düşürürdü. Gizli panolar 0. slotun ölçüsünü alıyor,
+  // görünür olduklarında zaten doğru boyutta oluyorlar (UI.md D9).
+  // Sürükleme sırasında açılan boşluk alanın **%20'si**. Panoları eşit dilimlere
+  // bölmek yarım sayfayı kaydırıyordu; burada panolar kalan %80'i paylaşıyor,
+  // yani iki panelde her biri yalnızca %10 daralıyor.
+  const GAP_SHARE = 20;
+
+  function box(el, leftPercent, widthPercent) {
+    el.style.left = "calc(" + leftPercent + "% + " + (leftPercent > 0 ? 1 : 0) + "px)";
+    el.style.width = "calc(" + widthPercent + "% - " + (widthPercent < 100 ? 1 : 0) + "px)";
+  }
+
+  function place() {
+    const total = layout.length;
+    const open = gapIndex !== null;
+    const share = (open ? 100 - GAP_SHARE : 100) / Math.max(total, 1);
+
+    for (const [id, rec] of panes) {
+      const position = layout.indexOf(id);
+      const at = position < 0 ? 0 : position;
+      const offset = (open && at >= gapIndex) ? GAP_SHARE : 0;
+      box(rec.el, at * share + offset, share);
+    }
+    if (open) {
+      box(gap, gapIndex * share, GAP_SHARE);
+      gap.dataset.on = "1";
+    } else {
+      gap.dataset.on = "0";
+    }
+  }
+
+  /// Sürükleme sırasında: panolar yer açsın. `index === null` boşluğu kapatıyor.
+  window.reevePreview = function (index) {
+    gapIndex = index;
+    place();
+    // Boşluk açılırken terminalleri yeniden ölçmüyoruz: sürükleme birkaç yüz
+    // milisaniye sürüyor, her karede ioctl atmak süreçleri boşuna uyandırırdı.
+  };
+
+  /// Panel tavanındayken araya sıkıştırma yok; hedef panel vurgulanıyor.
+  window.reeveHighlight = function (id) {
+    for (const [key, rec] of panes) {
+      rec.el.dataset.target = (id && key === id) ? "1" : "0";
+    }
+  };
+
+  window.reeveLayout = function (slots) {
+    layout = Array.isArray(slots) && slots.length ? slots : [null];
+    gapIndex = null;
+    gap.dataset.on = "0";
+    for (const [id, rec] of panes) {
+      const visible = layout.indexOf(id) >= 0;
+      rec.el.dataset.active = visible ? "1" : "0";
+      rec.el.dataset.target = "0";
+      if (visible) { attachWebgl(rec); } else { detachWebgl(rec); }
+    }
+    place();
+    // İki kez ölçüyoruz. İlki anında, ikincisi geçiş bittikten sonra: yumuşak
+    // animasyon sürerken fit() aradaki genişliği ölçüp yanlış sütun sayısı
+    // buluyor ve terminal o boyutta kalıyordu.
+    syncAll();
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(syncAll, 340);
+  };
+
+  window.reeveSelect = function (id) {
+    const rec = panes.get(id);
+    if (!rec) return;
+    activeID = id;
+    rec.fit.fit();
+    reportSize(id, rec);
+    rec.term.focus();
+  };
+
+  // ⌘F — görünür panolarda ara.
+  window.reeveFind = function (query, forward) {
+    for (const id of layout) {
+      const rec = id && panes.get(id);
+      if (!rec) continue;
+      const found = forward
+        ? rec.search.findNext(query)
+        : rec.search.findPrevious(query);
+      if (found && id === activeID) return;
+    }
+  };
+
+  window.reeveClearFind = function () {
+    for (const [, rec] of panes) rec.search.clearDecorations();
+  };
+
+  window.reeveDispose = function (id) {
+    const rec = panes.get(id);
+    if (!rec) return;
+    detachWebgl(rec);
+    rec.term.dispose();
+    rec.el.remove();
+    panes.delete(id);
+    if (activeID === id) activeID = null;
+  };
+
+  window.reeveWrite = function (id, b64) {
+    const rec = panes.get(id);
+    if (rec) rec.term.write(fromB64(b64));
+  };
+
+  window.reeveFocus = function () {
+    if (activeID && panes.has(activeID)) panes.get(activeID).term.focus();
+  };
+
+  // ---- boyut zinciri ----
+  // Panolar hep aynı ölçüde (inset:0) ve gizli olanlar da ölçülebilir olduğu için
+  // pencere boyu değişince HEPSİ yeniden fit edilir; her biri kendi ioctl'ini alır.
+  const syncAll = () => {
+    for (const [id, rec] of panes) {
+      rec.fit.fit();
+      reportSize(id, rec);
+    }
+  };
+  new ResizeObserver(syncAll).observe(host);
+  window.addEventListener("resize", syncAll);
+
+  let probe = "dom";
+  try {
+    const canvas = document.createElement("canvas");
+    probe = (canvas.getContext("webgl2") || canvas.getContext("webgl")) ? "webgl" : "dom";
+  } catch (e) { probe = "dom"; }
+
+  send("ready", { renderer: probe });
+})();
+</script>
+</body>
+</html>
