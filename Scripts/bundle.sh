@@ -19,6 +19,7 @@ cp "$BIN/Reeve" "$APP/Contents/MacOS/Reeve"
 # Kaynaklar doğrudan Contents/Resources'a giriyor; Res.root önce orayı bakıyor.
 # (SwiftPM'in Bundle.module'ü bundle'ı Reeve.app'in YANINDA arardı — Contents/ dışı.)
 cp -R "$BIN/Reeve_Reeve.bundle/Resources/." "$APP/Contents/Resources/"
+cp Design/Reeve.icns "$APP/Contents/Resources/Reeve.icns"
 rm -f "$APP/Contents/Resources/vendor/update.sh" "$APP/Contents/Resources/vendor/VENDOR.md"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -28,6 +29,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <dict>
   <key>CFBundleExecutable</key><string>Reeve</string>
   <key>CFBundleIdentifier</key><string>io.reeve.app</string>
+  <key>CFBundleIconFile</key><string>Reeve</string>
   <key>CFBundleName</key><string>Reeve</string>
   <key>CFBundleDisplayName</key><string>Reeve</string>
   <key>CFBundlePackageType</key><string>APPL</string>

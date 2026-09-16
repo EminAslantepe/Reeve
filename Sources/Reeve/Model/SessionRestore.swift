@@ -14,6 +14,7 @@ struct SavedSession: Codable, Equatable {
     var claudeSessionID: String
 }
 
+@MainActor
 enum SessionRestore {
     private static let key = "OpenSessions"
 

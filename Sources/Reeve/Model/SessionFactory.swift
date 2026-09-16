@@ -28,6 +28,7 @@ enum Template: String, CaseIterable, Identifiable {
     var kind: Session.Kind { self == .shell ? .shell : .claude }
 }
 
+@MainActor
 enum SessionFactory {
 
     static var loginShell: String {
@@ -93,6 +94,29 @@ enum SessionFactory {
                        claudeSessionID: sessionID,
                        paneID: paneID,
                        launch: .init(executable: shell, args: args, env: env))
+    }
+
+    /// Harici bir oturumun **konuşmasını** Reeve'de sürdürür.
+    ///
+    /// Terminali devralamıyoruz — PTY onu yaratan sürecin. Ama `--resume`
+    /// konuşmayı kimliğinden açıyor, yani içerik Reeve'e geliyor. Oturum başka
+    /// bir yerde hâlâ çalışıyorsa claude bunu söyleyip kopya başlatır.
+    static func resume(external session: Session) -> Session {
+        let shell = loginShell
+        let paneID = UUID()
+        var env = baseEnvironment()
+        env["REEVE_PANE_ID"] = paneID.uuidString
+        let id = session.claudeSessionID.uuidString.lowercased()
+        return Session(
+            name: session.name,
+            cwd: session.cwd,
+            kind: .claude,
+            origin: .center,
+            claudeSessionID: session.claudeSessionID,
+            paneID: paneID,
+            launch: .init(executable: shell,
+                          args: ["-l", "-c", "claude --resume '\(id)'; exec '\(shell)' -i"],
+                          env: env))
     }
 
     static func make(template: Template, cwd: String, name: String) -> Session {

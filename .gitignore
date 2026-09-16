@@ -6,3 +6,7 @@ build/
 
 # macOS
 .DS_Store
+
+# İkon ara ürünleri — Design/build-icon.sh yeniden üretir
+Design/icon-1024.png
+Design/Reeve.iconset/

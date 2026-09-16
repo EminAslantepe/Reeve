@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 
 /// Sidebar'dan sürüklenen oturumu takip eder ve nereye bırakılacağını canlı tutar.
+@MainActor
 @Observable
 final class DragState {
     private(set) var sessionID: Session.ID?
@@ -64,16 +65,18 @@ final class DragState {
     /// yalnızca tepkiyi hızlandırıyor.
     private func startWatching() {
         guard watchdog == nil else { return }
-        let finish: () -> Void = { [weak self] in
-            DispatchQueue.main.async { self?.end() }
+        let finish: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor in self?.end() }
         }
         local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { event in
             finish(); return event
         }
         global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { _ in finish() }
         watchdog = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard NSEvent.pressedMouseButtons == 0 else { return }
-            self?.end()
+            MainActor.assumeIsolated {
+                guard NSEvent.pressedMouseButtons == 0 else { return }
+                self?.end()
+            }
         }
     }
 

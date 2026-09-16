@@ -9,6 +9,7 @@ struct SidebarView: View {
     let tier: SidebarTier
     let onNew: () -> Void
     let onAttach: (Session) -> Void
+    let onResume: (Session) -> Void
     let onStop: (Session) -> Void
 
     @State private var query = ""
@@ -53,7 +54,7 @@ struct SidebarView: View {
     private var narrow: some View {
         ScrollView {
             VStack(spacing: 4) {
-                ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
+                ForEach(chips) { chip in
                     switch chip {
                     case .rule:
                         Rectangle().fill(Theme.ruleSoft)
@@ -115,9 +116,18 @@ struct SidebarView: View {
     }
 
     /// Dar/kapalı kademenin düz listesi: önce bekleyenler, sonra gruplar, aralarda çizgi.
-    private enum Chip {
+    /// Kimlik `offset` olamaz: sıra değişince SwiftUI "0. eleman hâlâ 0. eleman"
+    /// sanıp taşıma animasyonu yerine içerik takası yapıyor, liste zıplıyor.
+    private enum Chip: Identifiable {
         case session(Session, String)
-        case rule
+        case rule(Int)
+
+        var id: String {
+            switch self {
+            case .session(let session, _): return session.id.uuidString
+            case .rule(let index): return "rule-\(index)"
+            }
+        }
     }
 
     private var chips: [Chip] {
@@ -130,7 +140,7 @@ struct SidebarView: View {
         var index = 0
         var out: [Chip] = []
         for (position, bucket) in ordered.enumerated() {
-            if position > 0 { out.append(.rule) }
+            if position > 0 { out.append(.rule(position)) }
             for session in bucket {
                 out.append(.session(session, tags[index]))
                 index += 1
@@ -282,6 +292,8 @@ struct SidebarView: View {
             if session.origin == .backgroundAgent {
                 Button("Terminalde aç") { onAttach(session) }
                 Button("Durdur (claude stop)") { onStop(session) }
+            } else {
+                Button("Reeve'de devam et") { onResume(session) }
             }
             Button("Listeden çıkar") { store.remove(session) }
         }

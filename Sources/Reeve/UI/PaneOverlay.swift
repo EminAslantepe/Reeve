@@ -11,6 +11,7 @@ struct PaneOverlay: View {
     let store: SessionStore
     let drag: DragState
     let onAttach: (Session) -> Void
+    let onResume: (Session) -> Void
     let onStop: (Session) -> Void
 
     var body: some View {
@@ -64,10 +65,11 @@ struct PaneOverlay: View {
         HStack(spacing: 1) {
             ForEach(0..<store.paneCount, id: \.self) { index in
                 if let session = store.session(store.panes[index]), !session.hasTerminal {
-                    ExternalSessionCard(session: session,
+                    ExternalSessionView(session: session,
                                         tick: store.tick,
                                         compact: store.paneCount > 1,
                                         onAttach: onAttach,
+                                        onResume: onResume,
                                         onStop: onStop)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {

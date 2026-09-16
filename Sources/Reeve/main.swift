@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Uygulamanın omurgası: pencere, menü, araç çubuğu ve tüm katmanların kablolaması.
+@MainActor
 final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
 
     private let store = SessionStore()
@@ -18,8 +19,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     private var window: NSWindow!
     private var sheet: NSWindow?
     private var palette: NSWindow?
-    private var cardView: NSHostingView<AnyView>!
-    private var findView: NSHostingView<AnyView>!
+    // Somut tip: `AnyView` sarmalayıcısı SwiftUI'nin görünüm kimliğini siliyor
+    // ve her atamada ağacı baştan kurduruyor.
+    private var cardView: NSHostingView<PaneOverlay>!
+    private var findView: NSHostingView<FindBar>!
     private var sidebarItem: NSSplitViewItem!
     private var inspectorItem: NSSplitViewItem!
 
@@ -143,15 +146,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         }
     }
 
+    private func makeOverlay() -> PaneOverlay {
+        PaneOverlay(store: store,
+                    drag: drag,
+                    onAttach: { [weak self] in self?.attach($0) },
+                    onResume: { [weak self] in self?.resume($0) },
+                    onStop: { [weak self] in self?.stop($0) })
+    }
+
+    private func makeFindBar() -> FindBar {
+        FindBar(onFind: { [weak self] query, forward in
+                    self?.host.find(query, forward: forward)
+                },
+                onClose: { [weak self] in self?.closeFind() })
+    }
+
     /// Terminali bizde olmayan oturum hangi paneldeyse, bilgi kartı o panelde çıkar.
     /// WKWebView hiç gizlenmiyor — boyutu değişmesin, gizli xterm'ler bozulmasın (D2).
     private func refreshContent() {
         guard let cardView else { return }
-        cardView.rootView = AnyView(
-            PaneOverlay(store: store,
-                        drag: drag,
-                        onAttach: { [weak self] in self?.attach($0) },
-                        onStop: { [weak self] in self?.stop($0) }))
+        cardView.rootView = makeOverlay()
         cardView.isHidden = false
     }
 
@@ -162,6 +176,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         guard let session = SessionFactory.attach(to: agent) else { return }
         store.remove(agent)
         store.add(session)
+    }
+
+    /// Harici oturumun konuşmasını Reeve'de sürdürür.
+    ///
+    /// Oturum başka bir terminalde hâlâ çalışıyorsa `--resume` kopya açar; iki
+    /// ajan aynı konuşmaya yazar. Bu yüzden canlıysa önce soruyoruz.
+    private func resume(_ session: Session) {
+        let live = session.status == .busy || session.status.isWaiting
+        if live {
+            let alert = NSAlert()
+            alert.messageText = "Bu oturum başka bir terminalde çalışıyor"
+            alert.informativeText = "Şimdi sürdürmek konuşmanın bir kopyasını açar; "
+                + "iki ajan aynı geçmişe yazmış olur. Oturum boşa düşene kadar "
+                + "beklemek daha güvenli."
+            alert.addButton(withTitle: "Yine de aç")
+            alert.addButton(withTitle: "Vazgeç")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        let opened = SessionFactory.resume(external: session)
+        store.remove(session)
+        store.add(opened)
     }
 
     private func stop(_ agent: Session) {
@@ -290,6 +325,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
                     tier: tier,
                     onNew: { [weak self] in self?.newSession(nil) },
                     onAttach: { [weak self] in self?.attach($0) },
+                    onResume: { [weak self] in self?.resume($0) },
                     onStop: { [weak self] in self?.stop($0) })
     }
 
@@ -350,11 +386,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     @objc func toggleFind(_ sender: Any?) {
         guard let findView else { return }
         if findView.isHidden {
-            findView.rootView = AnyView(
-                FindBar(onFind: { [weak self] query, forward in
-                            self?.host.find(query, forward: forward)
-                        },
-                        onClose: { [weak self] in self?.closeFind() }))
+            findView.rootView = makeFindBar()
             findView.isHidden = false
         } else {
             closeFind()
@@ -495,8 +527,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         let content = NSViewController()
         content.view = NSView()
         let headers = NSHostingView(rootView: PaneHeaderBar(store: store))
-        cardView = NSHostingView(rootView: AnyView(EmptyView()))
-        findView = NSHostingView(rootView: AnyView(EmptyView()))
+        cardView = NSHostingView(rootView: makeOverlay())
+        findView = NSHostingView(rootView: makeFindBar())
         findView.isHidden = true
 
         for view in [headers, host.webView, cardView!, findView!] {
@@ -734,8 +766,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     }
 }
 
-let app = NSApplication.shared
-app.setActivationPolicy(.regular)
-let controller = AppController()
-app.delegate = controller
-app.run()
+// Üst düzey kod ana iş parçacığında çalışıyor; izolasyonu derleyiciye söylüyoruz.
+MainActor.assumeIsolated {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    let controller = AppController()
+    app.delegate = controller
+    app.run()
+}

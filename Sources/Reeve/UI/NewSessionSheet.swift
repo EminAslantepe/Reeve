@@ -7,12 +7,27 @@ import SwiftUI
 /// İkisi de Faz 2'ye ait (model listesi ve `--bg`'nin PTY'siz yaşam döngüsü);
 /// çalışmayan kontrol koymamak için şimdilik yoklar.
 struct NewSessionSheet: View {
-    @State var cwd: String
-    @State var template: Template = .claude
-    @State var name: String
-    let recents: [String]
-    let onCancel: () -> Void
-    let onOpen: (String, Template, String) -> Void
+    // `@State` yalnızca onu yaratan görünüme ait olmalı ve dışarıdan
+    // beslenmemeli; init içinde başlangıç değeri vermek doğru kalıp.
+    @State private var cwd: String
+    @State private var template: Template = .claude
+    @State private var name: String
+
+    private let recents: [String]
+    private let onCancel: () -> Void
+    private let onOpen: (String, Template, String) -> Void
+
+    init(cwd: String,
+         name: String,
+         recents: [String],
+         onCancel: @escaping () -> Void,
+         onOpen: @escaping (String, Template, String) -> Void) {
+        _cwd = State(initialValue: cwd)
+        _name = State(initialValue: name)
+        self.recents = recents
+        self.onCancel = onCancel
+        self.onOpen = onOpen
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

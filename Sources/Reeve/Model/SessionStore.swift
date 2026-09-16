@@ -4,6 +4,7 @@ import Observation
 
 /// Tek doğruluk kaynağı. PTY'ler, `claude agents --json` ve git hepsi buraya yazar;
 /// UI sadece burayı izler.
+@MainActor
 @Observable
 final class SessionStore {
 
@@ -46,7 +47,8 @@ final class SessionStore {
 
     init() {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.tick &+= 1
+            // Timer ana çalışma döngüsünde tetikleniyor; izolasyonu derleyiciye söylüyoruz.
+            MainActor.assumeIsolated { self?.tick &+= 1 }
         }
     }
 

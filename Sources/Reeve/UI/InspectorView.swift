@@ -5,6 +5,7 @@ import SwiftUI
 /// İnceleme panelinin istek üzerine doldurulan verisi.
 /// `git diff` büyük repolarda pahalı; düzenli yoklamaya sokulmadı, panel
 /// açıkken ve seçim değiştikçe tazeleniyor.
+@MainActor
 @Observable
 final class InspectorModel {
     var changes: [GitChange] = []

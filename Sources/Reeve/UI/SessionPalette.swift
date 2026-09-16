@@ -13,10 +13,14 @@ struct SessionPalette: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Skorlama **bir kez** burada. Önceden `matches`, `waitingMatches`,
+        // `otherMatches` ve `resultsHeight` ayrı ayrı `ranked`i çağırıyordu:
+        // tek çizimde dokuz tam skorlama + sıralama, her tuş vuruşunda.
+        let split = partition(ranked)
+        return VStack(alignment: .leading, spacing: 0) {
             field
             Rectangle().fill(Theme.rule).frame(height: 1)
-            results
+            results(split)
             Rectangle().fill(Theme.rule).frame(height: 1)
             footer
         }
@@ -49,8 +53,8 @@ struct SessionPalette: View {
     }
 
     @ViewBuilder
-    private var results: some View {
-        if matches.isEmpty {
+    private func results(_ split: Split) -> some View {
+        if split.waiting.isEmpty && split.other.isEmpty {
             Text("eşleşme yok")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Theme.ink3)
@@ -59,16 +63,19 @@ struct SessionPalette: View {
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if !waitingMatches.isEmpty {
+                    // Not: `ForEach(x.enumerated())` doğrudan kullanmak macOS 15+
+                    // istiyor (EnumeratedSequence'ın RandomAccessCollection uyumu
+                    // yeni). Hedefimiz macOS 14, o yüzden Array(...) kalıyor.
+                    if !split.waiting.isEmpty {
                         sectionLabel("Bekleyen")
-                        ForEach(Array(waitingMatches.enumerated()), id: \.element.id) { index, session in
+                        ForEach(Array(split.waiting.enumerated()), id: \.element.id) { index, session in
                             row(session, index: index)
                         }
                     }
-                    if !otherMatches.isEmpty {
+                    if !split.other.isEmpty {
                         sectionLabel("Tüm oturumlar")
-                        ForEach(Array(otherMatches.enumerated()), id: \.element.id) { index, session in
-                            row(session, index: waitingMatches.count + index)
+                        ForEach(Array(split.other.enumerated()), id: \.element.id) { index, session in
+                            row(session, index: split.waiting.count + index)
                         }
                     }
                 }
@@ -76,14 +83,15 @@ struct SessionPalette: View {
             }
             // ScrollView'ün doğal yüksekliği yok; pencere içeriğine göre
             // boyutlandığı için burada açıkça vermek zorundayız.
-            .frame(height: resultsHeight)
+            .frame(height: height(of: split))
         }
     }
 
     /// Satır ve başlık sayısından hesaplanıyor, 300'de tavan yapıyor.
-    private var resultsHeight: CGFloat {
-        let rows = CGFloat(matches.count) * 30
-        let labels = CGFloat((waitingMatches.isEmpty ? 0 : 1) + (otherMatches.isEmpty ? 0 : 1)) * 25
+    private func height(of split: Split) -> CGFloat {
+        let rows = CGFloat(split.waiting.count + split.other.count) * 30
+        let labels = CGFloat((split.waiting.isEmpty ? 0 : 1)
+                           + (split.other.isEmpty ? 0 : 1)) * 25
         return min(300, rows + labels + 6)
     }
 
@@ -132,15 +140,21 @@ struct SessionPalette: View {
 
     // MARK: - Eşleştirme
 
-    private var waitingMatches: [Session] {
-        ranked.filter(\.status.isWaiting)
+    /// Sıralama kuralı sabit: önce bekleyenler, sonra eşleşme skoru.
+    struct Split {
+        var waiting: [Session] = []
+        var other: [Session] = []
+        var all: [Session] { waiting + other }
     }
 
-    private var otherMatches: [Session] {
-        ranked.filter { !$0.status.isWaiting }
+    private func partition(_ sessions: [Session]) -> Split {
+        var split = Split()
+        for session in sessions {
+            if session.status.isWaiting { split.waiting.append(session) }
+            else { split.other.append(session) }
+        }
+        return split
     }
-
-    private var matches: [Session] { waitingMatches + otherMatches }
 
     private var ranked: [Session] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -195,10 +209,11 @@ struct SessionPalette: View {
         case .upArrow:
             cursor = max(0, cursor - 1)
         case .downArrow:
-            cursor = min(matches.count - 1, cursor + 1)
+            cursor = min(partition(ranked).all.count - 1, cursor + 1)
         case .return:
-            guard matches.indices.contains(cursor) else { return .handled }
-            open(matches[cursor], secondPane: press.modifiers.contains(.option))
+            let all = partition(ranked).all
+            guard all.indices.contains(cursor) else { return .handled }
+            open(all[cursor], secondPane: press.modifiers.contains(.option))
         default:
             return .ignored
         }

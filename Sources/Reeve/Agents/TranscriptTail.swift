@@ -59,8 +59,9 @@ final class TranscriptTail {
     /// Ana kuyrukta: oturum kimliği → son konuşma adımları.
     var onTurns: (([UUID: [Turn]]) -> Void)?
 
-    /// Bellekte tutulan adım sayısı. Transcript megabaytlara çıkabiliyor.
-    private static let keep = 40
+    /// Bellekte tutulan adım sayısı. Transcript megabaytlara çıkabiliyor ama
+    /// harici oturumlarda tek görebildiğimiz şey bu, o yüzden cömert tutuyoruz.
+    private static let keep = 150
 
     private static var projectsRoot: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -225,7 +226,7 @@ final class TranscriptTail {
     private static func clip(_ text: String) -> String {
         let flat = text.replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "  ", with: " ")
-        return flat.count > 220 ? String(flat.prefix(219)) + "…" : flat
+        return flat.count > 600 ? String(flat.prefix(599)) + "…" : flat
     }
 
     /// `claude-opus-5[1m]` → `Opus 5`

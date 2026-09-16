@@ -2,6 +2,7 @@ import Foundation
 import Observation
 
 /// Tek bir oturum. PTY'si, kimliği ve sol panelde görünen her şeyi taşır.
+@MainActor
 @Observable
 final class Session: Identifiable {
 

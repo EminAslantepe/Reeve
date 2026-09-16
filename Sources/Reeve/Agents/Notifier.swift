@@ -29,6 +29,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Oturum nesnelerine dokunuyor; onlar ana aktöre bağlı.
+    @MainActor
     func handle(_ transitions: [SessionStore.Transition]) {
         guard !NSApp.isActive else { return }
 
@@ -51,6 +53,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Dock ikonundaki sayı: dikkat bekleyen oturum sayısı.
+    @MainActor
     func updateBadge(waiting: Int) {
         NSApp.dockTile.badgeLabel = waiting > 0 ? "\(waiting)" : nil
     }

@@ -93,16 +93,25 @@ struct SessionRow: View {
         }
     }
 
-    @ViewBuilder
+    /// Tek şekil, renkler ternary ile seçiliyor.
+    ///
+    /// Önceden `if/else` ile üç ayrı görünüm döndürüyordu; SwiftUI bunu
+    /// `_ConditionalContent` olarak sarıyor ve dal değişince görünümü baştan
+    /// kuruyor. Yani satır seçiliyken seçilmeze geçtiğinde renk **animasyonla
+    /// değil, sıçrayarak** değişiyordu. Tek şekilde yapısal kimlik korunuyor.
     private var background: some View {
-        if isAlarm {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Theme.wait.opacity(0.11))
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Theme.wait.opacity(0.26), lineWidth: 1))
-        } else if isSelected {
-            RoundedRectangle(cornerRadius: 6).fill(Theme.selection)
-        }
+        RoundedRectangle(cornerRadius: 6)
+            .fill(fillColor)
+            .stroke(strokeColor, lineWidth: 1)
+    }
+
+    private var fillColor: Color {
+        if isAlarm { return Theme.wait.opacity(0.11) }
+        return isSelected ? Theme.selection : .clear
+    }
+
+    private var strokeColor: Color {
+        isAlarm ? Theme.wait.opacity(0.26) : .clear
     }
 }
 
