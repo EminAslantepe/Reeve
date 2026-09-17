@@ -40,7 +40,7 @@ struct InspectorView: View {
             } else {
                 Spacer()
                 Text("oturum seçili değil")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(Theme.ink3)
                 Spacer()
             }
@@ -57,7 +57,7 @@ struct InspectorView: View {
     private var header: some View {
         HStack(spacing: 6) {
             Text("İNCELE")
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .kerning(0.75)
                 .foregroundStyle(Theme.ink3)
             Spacer()
@@ -108,7 +108,7 @@ struct InspectorView: View {
                 ForEach(model.changes.prefix(14)) { change in
                     HStack(spacing: 8) {
                         Text(change.name)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(Theme.ink2)
                             .lineLimit(1)
                             .truncationMode(.head)
@@ -118,9 +118,9 @@ struct InspectorView: View {
                         Text("−\(change.removed)")
                             .foregroundStyle(Theme.wait)
                     }
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 4)
                 }
             }
             if !model.worktrees.isEmpty {
@@ -130,13 +130,13 @@ struct InspectorView: View {
                             .font(.system(size: 8))
                             .foregroundStyle(Theme.ink3)
                         Text(tree.branch ?? tree.name)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(Theme.ink3)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 4)
                     .help(tree.path)
                 }
             }
@@ -168,11 +168,11 @@ struct InspectorView: View {
                 ForEach(session.turns.suffix(12).reversed()) { turn in
                     HStack(alignment: .top, spacing: 7) {
                         Text(marker(turn.kind))
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .foregroundStyle(color(turn.kind))
                             .frame(width: 10, alignment: .leading)
                         Text(turn.text)
-                            .font(.system(size: 10.5))
+                            .font(.system(size: 12))
                             .foregroundStyle(turn.kind == .tool ? Theme.ink3 : Theme.ink2)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
@@ -182,7 +182,7 @@ struct InspectorView: View {
                 }
                 Button("Transcript dosyasını göster") { onRevealTranscript(session) }
                     .buttonStyle(.plain)
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.busy)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
@@ -211,16 +211,16 @@ struct InspectorView: View {
     private func pair(_ key: String, _ value: String, dim: Bool = false) -> some View {
         HStack {
             Text(key)
-                .font(.system(size: 11))
+                .font(.system(size: 12))
                 .foregroundStyle(Theme.ink3)
             Spacer(minLength: 8)
             Text(value)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .monospacedDigit()
                 .foregroundStyle(dim ? Theme.ink3 : Theme.ink)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     private func line(icon: String, text: String, value: String, dim: Bool) -> some View {
@@ -229,25 +229,25 @@ struct InspectorView: View {
                 .font(.system(size: 8))
                 .foregroundStyle(Theme.ink3)
             Text(text)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
             Spacer(minLength: 6)
             Text(value)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.ink3)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
         .opacity(dim ? 0.55 : 1)
     }
 
     private func note(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 10.5, design: .monospaced))
+            .font(.system(size: 12, design: .monospaced))
             .foregroundStyle(Theme.ink3)
             .padding(.horizontal, 12)
-            .padding(.vertical, 2)
+            .padding(.vertical, 4)
     }
 
     private static func compact(_ value: Int) -> String {
@@ -278,7 +278,7 @@ private struct Section<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Text(title.uppercased())
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .kerning(0.7)
                     .foregroundStyle(Theme.ink3)
                 Rectangle().fill(Theme.ruleSoft).frame(height: 1)

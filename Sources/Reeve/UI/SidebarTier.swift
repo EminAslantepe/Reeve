@@ -11,8 +11,8 @@ enum SidebarTier: String, CaseIterable {
 
     var width: CGFloat {
         switch self {
-        case .wide:   return 268
-        case .narrow: return 58
+        case .wide:   return Theme.sidebarWidth
+        case .narrow: return 64
         }
     }
 

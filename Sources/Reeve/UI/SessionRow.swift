@@ -10,8 +10,8 @@ import SwiftUI
 struct SessionRow: View {
     let session: Session
     let isSelected: Bool
-    /// Store'un sayacı; değişmesi satırı yeniden kurdurup `elapsed`i tazeliyor.
-    let tick: Int
+    var isFocused = false
+    @State private var hovering = false
 
     private var isAlarm: Bool {
         if case .waiting = session.status { return true }
@@ -24,10 +24,10 @@ struct SessionRow: View {
                 .frame(width: 16)
                 .padding(.top, 4)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Text(session.name)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                     if session.hasUnseenOutput {
@@ -37,51 +37,50 @@ struct SessionRow: View {
                             .padding(.leading, 6)
                     }
                     Spacer(minLength: 8)
-                    Text(whenText)
-                        .font(.system(size: isAlarm ? 10 : 11,
-                                      weight: isAlarm ? .semibold : .regular))
+                    TimelineView(.periodic(from: .now, by: 30)) { _ in
+                        Text(whenText)
+                    }
+                        .font(.system(size: 11, weight: isAlarm ? .semibold : .regular))
                         .monospacedDigit()
                         .foregroundStyle(isAlarm ? Theme.wait : Theme.ink3)
                         .fixedSize()
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(session.subtitle)
-                        .font(.system(size: 11.5, design: .monospaced))
+                    Text(detailText)
+                        .font(.system(size: 12))
                         .foregroundStyle(metaColor)
                         .lineLimit(1)
-                        // Yolda anlamlı olan son klasör, mesajda ilk kelimeler.
-                        .truncationMode(showsPath ? .head : .tail)
-                    // Maliyet/token sağ alt köşede — mockup'ın ayırdığı hücre.
-                    if let cost = session.costLabel {
-                        Spacer(minLength: 4)
-                        Text(cost)
-                            .font(.system(size: 10.5, design: .monospaced))
-                            .monospacedDigit()
-                            .foregroundStyle(Theme.ink3)
-                            .fixedSize()
-                    }
+                        .truncationMode(.tail)
                 }
             }
         }
         .padding(.leading, 7)
         .padding(.trailing, 7)
-        .padding(.top, 5)
-        .padding(.bottom, 6)
+        .padding(.top, 9)
+        .padding(.bottom, 9)
         .background(background)
         .contentShape(Rectangle())
+        .onHover { hovering = $0 }
         .help("\(session.name) · \(session.displayCwd)")
     }
 
     private var whenText: String {
-        isAlarm ? "BEKLİYOR" : session.elapsed
+        isAlarm ? "Bekliyor" : session.elapsed
     }
 
-    /// İkinci satır bir yol mu, yoksa cümle mi?
-    private var showsPath: Bool {
+    private var detailText: String {
         switch session.status {
-        case .idle, .live: return session.origin != .backgroundAgent
-        default:           return false
+        case .busy, .waiting, .exited: return session.subtitle
+        case .idle, .live:
+            if session.activity != nil { return session.subtitle }
+            let state: String
+            switch session.origin {
+            case .backgroundAgent: state = "Arka plan ajanı"
+            case .external: state = "Harici oturum"
+            case .center: state = session.kind == .shell ? "Terminal açık" : "Hazır"
+            }
+            return [session.usage?.model, state].compactMap { $0 }.joined(separator: " · ")
         }
     }
 
@@ -107,11 +106,11 @@ struct SessionRow: View {
 
     private var fillColor: Color {
         if isAlarm { return Theme.wait.opacity(0.11) }
-        return isSelected ? Theme.selection : .clear
+        return isSelected ? Theme.selection : hovering ? Theme.choiceOn.opacity(0.55) : .clear
     }
 
     private var strokeColor: Color {
-        isAlarm ? Theme.wait.opacity(0.26) : .clear
+        isAlarm ? Theme.wait.opacity(0.26) : isFocused ? Theme.busy.opacity(0.4) : .clear
     }
 }
 
@@ -120,7 +119,6 @@ struct SessionRow: View {
 struct StatusDot: View {
     let status: Session.Status
     var origin: Session.Origin = .center
-    @State private var pulsing = false
 
     var body: some View {
         switch status {
@@ -129,10 +127,6 @@ struct StatusDot: View {
             filled(Theme.wait, halo: 0.20)
         case .busy:
             filled(origin == .backgroundAgent ? Theme.agent : Theme.busy, halo: 0.18)
-                .scaleEffect(pulsing ? 1.0 : 0.94)
-                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true),
-                           value: pulsing)
-                .onAppear { pulsing = true }
         case .exited:
             Circle()                                   // dolu, halosuz
                 .fill(Theme.error)

@@ -7,8 +7,6 @@ import SwiftUI
 @Observable
 final class DragState {
     private(set) var sessionID: Session.ID?
-    /// Panellerin arasında açılacak boşluğun yeri. `nil` = terminal alanı dışında.
-    private(set) var insertion: Int?
     /// Sidebar'da satırın hangi satırın önüne gireceği.
     private(set) var beforeRow: Session.ID?
 
@@ -27,28 +25,23 @@ final class DragState {
     func begin(_ id: Session.ID) {
         guard sessionID != id else { return }
         sessionID = id
-        insertion = nil
         beforeRow = nil
         startWatching()
         onChange?()
     }
 
-    func hover(insertion index: Int?) {
-        guard insertion != index else { return }
-        insertion = index
-        onChange?()
+    func hover(before row: Session.ID?) {
+        guard isActive, beforeRow != row else { return }
+        beforeRow = row
     }
 
-    func hover(before row: Session.ID?) {
-        guard beforeRow != row else { return }
-        beforeRow = row
-        onChange?()
+    func leave(row: Session.ID) {
+        if beforeRow == row { beforeRow = nil }
     }
 
     func end() {
         guard sessionID != nil else { return }
         sessionID = nil
-        insertion = nil
         beforeRow = nil
         stopWatching()
         onChange?()
@@ -72,12 +65,14 @@ final class DragState {
             finish(); return event
         }
         global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { _ in finish() }
-        watchdog = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard NSEvent.pressedMouseButtons == 0 else { return }
                 self?.end()
             }
         }
+        watchdog = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     private func stopWatching() {

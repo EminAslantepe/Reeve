@@ -291,6 +291,12 @@ final class SessionStore {
             onLayout?(visibleIDs)
             return
         }
+        if panes[pane] == id {
+            activePane = pane
+            session.hasUnseenOutput = false
+            onSelect?(session)
+            return
+        }
         // Aynı oturum iki panelde birden durmasın — yerlerini takas et.
         if let other = panes.firstIndex(of: id), other != pane {
             panes[other] = panes[pane]
@@ -314,16 +320,22 @@ final class SessionStore {
     /// açılacak boşluğun yeri. Tavana ulaşıldıysa araya sıkıştırmak yerine o
     /// panelin içeriği değişiyor.
     func insert(_ id: Session.ID, at index: Int) {
-        let slot = min(max(index, 0), paneCount)
-        if paneCount >= Self.maxPanes {
+        guard session(id) != nil else { return }
+        var slot = min(max(index, 0), paneCount)
+        // Zaten görünür olan bir oturumu taşımak boş panel üretmemeli.
+        if let existing = panes.firstIndex(of: id) {
+            panes.remove(at: existing)
+            if existing < slot { slot -= 1 }
+            panes.insert(id, at: slot)
+        } else if let empty = panes.firstIndex(of: nil) {
+            panes[empty] = id
+            slot = empty
+        } else if paneCount >= Self.maxPanes {
             select(id, in: min(slot, paneCount - 1))
             return
+        } else {
+            panes.insert(id, at: slot)
         }
-        // Oturum başka bir panelde duruyorsa oradan çıksın, ikiye bölünmesin.
-        if let existing = panes.firstIndex(of: id) {
-            panes[existing] = nil
-        }
-        panes.insert(id, at: slot)
         activePane = slot
         onLayout?(visibleIDs)
         if let session = selected {
@@ -336,6 +348,7 @@ final class SessionStore {
     func closePane(_ index: Int) {
         guard paneCount > 1, panes.indices.contains(index) else { return }
         panes.remove(at: index)
+        if index < activePane { activePane -= 1 }
         if activePane >= paneCount { activePane = paneCount - 1 }
         onLayout?(visibleIDs)
         if let session = selected { onSelect?(session) }
@@ -343,7 +356,7 @@ final class SessionStore {
 
     /// Sidebar'da sürükleyerek sıra değiştirme.
     func move(_ id: Session.ID, before target: Session.ID?) {
-        guard let from = sessions.firstIndex(where: { $0.id == id }) else { return }
+        guard id != target, let from = sessions.firstIndex(where: { $0.id == id }) else { return }
         let session = sessions.remove(at: from)
         if let target, let to = sessions.firstIndex(where: { $0.id == target }) {
             sessions.insert(session, at: to)
@@ -374,7 +387,7 @@ final class SessionStore {
             panes[pane] = (pane == 0 || next?.id != panes[0]) ? next?.id : nil
         }
         // Kapanan oturum yüzünden boşalan fazla paneli de kapat.
-        while panes.count > 1, panes.last == nil { panes.removeLast() }
+        while panes.count > 1, panes.last! == nil { panes.removeLast() }
         if activePane >= paneCount { activePane = paneCount - 1 }
         onLayout?(visibleIDs)
         if let current = selected { onSelect?(current) }

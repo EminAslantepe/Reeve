@@ -1,12 +1,6 @@
 import SwiftUI
 
-/// Terminalin üstünde duran, panel hizasına bölünmüş katman.
-///
-/// İki işi var:
-/// - PTY'si bizde olmayan oturum hangi panelde seçiliyse bilgi kartını orada gösterir.
-/// - Sidebar'dan bir oturum sürüklenirken bırakma bölgelerini açar.
-///
-/// Sürükleme yokken bütün hücreler tıklamayı altındaki terminale geçiriyor.
+/// Sürükleme hedefleri terminalin boyutunu değiştirmeden üstünde görünür.
 struct PaneOverlay: View {
     let store: SessionStore
     let drag: DragState
@@ -16,69 +10,52 @@ struct PaneOverlay: View {
 
     var body: some View {
         if drag.isActive {
-            dropZones
-        } else {
-            cards
-        }
-    }
-
-    // MARK: - Bırakma bölgeleri
-
-    /// Kesikli kutu çizmiyoruz: geri bildirim **panellerin kendisi**. Şeritler
-    /// görünmez, tek işleri imlecin hangi araya denk geldiğini bildirmek.
-    /// Boşluğu açan ve kapatan animasyon terminal tarafında (`reevePreview`).
-    private var dropZones: some View {
-        HStack(spacing: 0) {
-            ForEach(0..<slotCount, id: \.self) { slot in
-                Color.clear
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .dropDestination(for: String.self) { items, _ in
-                        guard let raw = items.first, let id = UUID(uuidString: raw)
-                        else { return false }
-                        commit(id, slot: slot)
+            HStack(spacing: 8) {
+                ForEach(0..<slotCount, id: \.self) { slot in
+                    ZoneCell(title: zoneTitle(slot),
+                             symbol: store.paneCount < SessionStore.maxPanes ? "rectangle.split.2x1" : "arrow.down.to.line") { raw in
+                        guard let id = UUID(uuidString: raw), store.session(id) != nil else { return false }
+                        if store.paneCount < SessionStore.maxPanes {
+                            store.insert(id, at: slot)
+                        } else {
+                            store.select(id, in: slot)
+                        }
+                        drag.end()
                         return true
-                    } isTargeted: { inside in
-                        drag.hover(insertion: inside ? slot : nil)
                     }
+                }
+            }
+            .padding(12)
+        } else {
+            HStack(spacing: 1) {
+                ForEach(0..<store.paneCount, id: \.self) { index in
+                    if let session = store.session(store.panes[index]), !session.hasTerminal {
+                        ExternalSessionView(session: session,
+                                            tick: store.tick,
+                                            compact: store.paneCount > 1,
+                                            onAttach: onAttach,
+                                            onResume: onResume,
+                                            onStop: onStop)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .allowsHitTesting(false)
+                    }
+                }
             }
         }
     }
 
-    /// Tavana ulaşılmadıysa panel sayısı + 1 ara var; ulaşıldıysa hedef panel seçiliyor.
     private var slotCount: Int {
         store.paneCount < SessionStore.maxPanes ? store.paneCount + 1 : store.paneCount
     }
 
-    private func commit(_ id: Session.ID, slot: Int) {
-        if store.paneCount < SessionStore.maxPanes {
-            store.insert(id, at: slot)
-        } else {
-            store.select(id, in: min(slot, store.paneCount - 1))
-        }
-        drag.end()
-    }
-
-    // MARK: - Bilgi kartları
-
-    private var cards: some View {
-        HStack(spacing: 1) {
-            ForEach(0..<store.paneCount, id: \.self) { index in
-                if let session = store.session(store.panes[index]), !session.hasTerminal {
-                    ExternalSessionView(session: session,
-                                        tick: store.tick,
-                                        compact: store.paneCount > 1,
-                                        onAttach: onAttach,
-                                        onResume: onResume,
-                                        onStop: onStop)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .allowsHitTesting(false)
-                }
-            }
-        }
+    private func zoneTitle(_ slot: Int) -> String {
+        if store.paneCount == SessionStore.maxPanes { return "\(slot + 1). panelde aç" }
+        if slot == 0 { return "Solda aç" }
+        if slot == store.paneCount { return "Sağda aç" }
+        return "Araya aç"
     }
 }
 
@@ -86,25 +63,21 @@ private struct ZoneCell: View {
     let title: String
     let symbol: String
     let onDrop: (String) -> Bool
-
     @State private var targeted = false
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .light))
-            Text(title)
-                .font(.system(size: 11, design: .monospaced))
+        VStack(spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 24, weight: .light))
+            Text(title).font(.system(size: 13, weight: .medium))
         }
         .foregroundStyle(targeted ? Theme.ink : Theme.ink2)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(targeted ? Theme.busy.opacity(0.18) : Color.white.opacity(0.03))
+                .fill(targeted ? Theme.selection.opacity(0.96) : Theme.appBG.opacity(0.9))
                 .overlay(RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(targeted ? Theme.busy : Theme.rule,
-                                  style: StrokeStyle(lineWidth: targeted ? 2 : 1, dash: [5, 4])))
-                .padding(6))
+                                  lineWidth: targeted ? 2 : 1)))
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first else { return false }
             return onDrop(raw)

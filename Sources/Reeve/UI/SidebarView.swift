@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Sol panel, üç kademede (UI.md §1.1).
+/// Klasörlere göre gruplanmış, iki genişlikte kullanılabilen oturum listesi.
 /// Durum rengi her kademede taşınıyor; izin bekleyen oturum en ince halde bile görünür.
 struct SidebarView: View {
     let store: SessionStore
@@ -13,6 +13,8 @@ struct SidebarView: View {
     let onStop: (Session) -> Void
 
     @State private var query = ""
+    @State private var collapsedFolders: Set<String> = []
+    @State private var expandedSessions: Set<UUID> = []
 
     var body: some View {
         Group {
@@ -25,31 +27,45 @@ struct SidebarView: View {
         .background(Theme.sidebar)
     }
 
-    // MARK: - Geniş (268 px)
+    // MARK: - Geniş
 
     private var wide: some View {
         VStack(spacing: 0) {
+            sidebarHeader
             searchField
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if !waiting.isEmpty {
-                        SectionLabel(title: "Dikkat", count: waiting.count, git: nil, alarm: true)
+                        SectionLabel(title: "Yanıt bekleyenler", count: waiting.count, git: nil, alarm: true)
                         ForEach(waiting) { row($0) }
                     }
                     ForEach(visibleGroups, id: \.cwd) { group in
-                        SectionLabel(title: group.title, count: nil, git: group.git, alarm: false)
-                        ForEach(group.sessions) { row($0) }
+                        Button {
+                            if !collapsedFolders.insert(group.cwd).inserted {
+                                collapsedFolders.remove(group.cwd)
+                            }
+                        } label: {
+                            SectionLabel(title: group.title, count: group.sessions.count,
+                                         git: group.git, alarm: false,
+                                         collapsed: collapsedFolders.contains(group.cwd) && query.isEmpty)
+                        }
+                        .buttonStyle(.plain)
+                        .help(group.cwd)
+                        .accessibilityLabel("\(group.title), \(group.sessions.count) oturum")
+                        .accessibilityValue(collapsedFolders.contains(group.cwd) ? "Kapalı" : "Açık")
+                        if !collapsedFolders.contains(group.cwd) || !query.isEmpty {
+                            ForEach(group.sessions) { row($0) }
+                        }
                     }
                     if store.sessions.isEmpty { empty }
                     else if visibleGroups.isEmpty && waiting.isEmpty { noMatch }
                 }
-                .animation(.easeOut(duration: 0.18), value: store.sessions.map(\.id))
                 .padding(.bottom, 10)
             }
         }
     }
 
-    // MARK: - Dar (58 px) ve kapalı (30 px)
+    // MARK: - Dar
 
     private var narrow: some View {
         ScrollView {
@@ -74,7 +90,7 @@ struct SidebarView: View {
         return VStack(spacing: 4) {
             StatusDot(status: session.status, origin: session.origin)
             Text(tag)
-                .font(.system(size: 9.5, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(session.status.isWaiting ? Theme.wait
                                  : selected ? Theme.ink : Theme.ink3)
         }
@@ -91,14 +107,13 @@ struct SidebarView: View {
         }
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, let id = UUID(uuidString: raw),
-                  id != session.id else { drag.end(); return false }
-            withAnimation(.easeOut(duration: 0.18)) {
-                store.move(id, before: session.id)
-            }
+                  id != session.id, canReorder(id, before: session) else { drag.end(); return false }
+            store.move(id, before: session.id)
             drag.end()
             return true
         } isTargeted: { inside in
-            drag.hover(before: inside ? session.id : nil)
+            if inside { drag.hover(before: session.id) }
+            else { drag.leave(row: session.id) }
         }
         .contextMenu { menu(session) }
         .help("\(session.name) · \(session.displayCwd)")
@@ -169,12 +184,42 @@ struct SidebarView: View {
 
     // MARK: - Parçalar
 
+    private func canReorder(_ id: UUID, before target: Session) -> Bool {
+        guard let source = store.session(id) else { return false }
+        return source.cwd == target.cwd && source.status.isWaiting == target.status.isWaiting
+    }
+
+    private var sidebarHeader: some View {
+        HStack {
+            Text("Oturumlar")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+            Text("\(store.sessions.count)")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.ink2)
+            Spacer()
+            Button(action: onNew) {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 28, height: 28)
+                    .background(Theme.button, in: RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .help("Yeni oturum (⌘N)")
+            .accessibilityLabel("Yeni oturum")
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
+    }
+
     private var searchField: some View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Theme.ink3)
-            TextField("ara", text: $query)
+            TextField("Oturum veya klasör ara", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.ink)
@@ -188,7 +233,7 @@ struct SidebarView: View {
             }
         }
         .padding(.horizontal, 8)
-        .frame(height: 26)
+        .frame(height: 34)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(Theme.searchBG)
@@ -202,7 +247,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func row(_ session: Session) -> some View {
         let shown = store.pane(of: session.id) != nil
-        SessionRow(session: session, isSelected: shown, tick: store.tick)
+        SessionRow(session: session, isSelected: shown, isFocused: store.selectedID == session.id)
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
             // Sürüklenen satır yerinde soluyor: nereden çıktığı görünür kalıyor.
@@ -216,32 +261,44 @@ struct SidebarView: View {
             }
             .dropDestination(for: String.self) { items, _ in
                 guard let raw = items.first, let id = UUID(uuidString: raw),
-                      id != session.id else { drag.end(); return false }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    store.move(id, before: session.id)
-                }
+                      id != session.id, canReorder(id, before: session) else { drag.end(); return false }
+                store.move(id, before: session.id)
                 drag.end()
                 return true
             } isTargeted: { inside in
-                drag.hover(before: inside ? session.id : nil)
+                if inside { drag.hover(before: session.id) }
+                else { drag.leave(row: session.id) }
             }
 
         // Alt öğeler yalnızca panelde duran oturumda — her satırda göstermek
         // sidebar'ı gürültüye boğardı (UI.md §2, açık soru 5).
-        if shown {
-            ForEach(session.subagents) { agent in
-                SubItemRow(symbol: "gearshape",
-                           label: agent.name,
-                           value: agent.elapsed,
-                           dimmed: agent.finishedAt != nil,
-                           tick: store.tick)
+        if shown && (!session.subagents.isEmpty || !session.children.isEmpty) {
+            Button {
+                if !expandedSessions.insert(session.id).inserted { expandedSessions.remove(session.id) }
+            } label: {
+                Label("Alt ajanlar ve süreçler (\(session.subagents.count + session.children.count))",
+                      systemImage: expandedSessions.contains(session.id) ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ink2)
+                    .padding(.leading, 30)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+        }
+        if shown && expandedSessions.contains(session.id) {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                ForEach(session.subagents) { agent in
+                    SubItemRow(symbol: "gearshape",
+                               label: agent.name,
+                               value: agent.elapsed,
+                               dimmed: agent.finishedAt != nil)
+                }
             }
             ForEach(session.children) { child in
                 SubItemRow(symbol: "chevron.right.square",
                            label: child.name,
                            value: "pid \(child.id)",
-                           dimmed: false,
-                           tick: store.tick)
+                           dimmed: false)
             }
         }
     }
@@ -249,7 +306,8 @@ struct SidebarView: View {
     /// Satırın üstünde ince bir çizgi: bırakınca buraya girecek.
     @ViewBuilder
     private func insertionLine(above session: Session) -> some View {
-        if drag.beforeRow == session.id, drag.sessionID != session.id {
+        if drag.beforeRow == session.id, let source = drag.sessionID,
+           source != session.id, canReorder(source, before: session) {
             Capsule()
                 // Mavi fazla bağırıyordu; nötr ve ince.
                 .fill(Theme.ink2)
@@ -318,7 +376,6 @@ private struct SubItemRow: View {
     let label: String
     let value: String
     let dimmed: Bool
-    let tick: Int
 
     var body: some View {
         HStack(spacing: 8) {
@@ -351,25 +408,37 @@ private struct SectionLabel: View {
     let count: Int?
     let git: GitState?
     let alarm: Bool
+    var collapsed = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
-                .kerning(0.75)
-                .foregroundStyle(alarm ? Theme.wait : Theme.ink3)
-                .lineLimit(1)
-            if let count {
-                Text("(\(count))")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(alarm ? Theme.wait : Theme.ink3)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 7) {
+                Image(systemName: alarm ? "exclamationmark.bubble" : (collapsed ? "chevron.right" : "chevron.down"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 12)
+                if !alarm {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12))
+                }
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let count {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.choiceOn, in: Capsule())
+                }
             }
-            Rectangle().fill(Theme.ruleSoft).frame(height: 1)
-            if let git { GitBadge(state: git) }
+            .foregroundStyle(alarm ? Theme.wait : Theme.ink2)
+            if let git { GitBadge(state: git).padding(.leading, 19) }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 5)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+        .contentShape(Rectangle())
     }
 }
 
@@ -380,21 +449,20 @@ private struct GitBadge: View {
     var body: some View {
         HStack(spacing: 5) {
             Text(state.branch)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
                 .truncationMode(.middle)
             if state.dirty > 0 {
                 Text("●\(state.dirty)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Theme.wait)
             }
             if state.ahead > 0 {
                 Text("↑\(state.ahead)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Theme.ink3)
             }
         }
-        .fixedSize()
     }
 }

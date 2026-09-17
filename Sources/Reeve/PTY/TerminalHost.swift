@@ -80,16 +80,6 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         run("reeveLayout([\(list)])")
     }
 
-    /// Sürükleme sırasında panolar yer açsın. `nil` boşluğu kapatıyor.
-    func preview(gapAt index: Int?) {
-        run("reevePreview(\(index.map(String.init) ?? "null"))")
-    }
-
-    /// Panel tavanındayken hedef paneli vurgula.
-    func highlight(_ id: UUID?) {
-        run("reeveHighlight(\(id.map { "'\($0.uuidString)'" } ?? "null"))")
-    }
-
     func find(_ query: String, forward: Bool) {
         guard let escaped = jsString(query) else { return }
         run("reeveFind(\(escaped), \(forward))")

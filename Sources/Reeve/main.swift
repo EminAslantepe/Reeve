@@ -133,13 +133,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         drag.onChange = { [weak self] in
             guard let self else { return }
             self.refreshContent()
-            // Geri bildirim panellerin kendisinde: sürüklerken yer açıyorlar.
-            if self.store.paneCount < SessionStore.maxPanes {
-                self.host.preview(gapAt: self.drag.isActive ? self.drag.insertion : nil)
-            } else {
-                let slot = self.drag.insertion.map { min($0, self.store.paneCount - 1) }
-                self.host.highlight(self.drag.isActive ? slot.flatMap { self.store.panes[$0] } : nil)
-            }
         }
         notifier.onOpenSession = { [weak self] id in
             self?.store.select(id)
@@ -226,7 +219,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
 
     @objc func toggleInspector(_ sender: Any?) {
         inspector.isVisible.toggle()
-        inspectorItem.animator().isCollapsed = !inspector.isVisible
+        inspectorItem.isCollapsed = !inspector.isVisible
         refreshInspector()
     }
 
@@ -306,8 +299,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     private func applyTier(_ next: SidebarTier) {
         tier = next
         SidebarTier.stored = next
+        // Genişlerken önce üst sınırı aç; dar kademenin 64 px tavanıyla çakışmasın.
+        if next == .wide { sidebarItem.maximumThickness = 380 }
         sidebarItem.minimumThickness = next.width
-        sidebarItem.maximumThickness = next == .wide ? 320 : next.width
+        sidebarItem.maximumThickness = next == .wide ? 380 : next.width
         sidebarItem.viewController.view.window?.layoutIfNeeded()
         rebuildSidebar()
         // Kademe değişimi bir boyut değişimidir: JS tarafı ResizeObserver ile
@@ -427,8 +422,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
 
     // MARK: - Oturum açma
 
+    /// Finder ya da Dock'tan açılan bir uygulamanın çalışma dizini "/" olur;
+    /// oturum için anlamsız bir başlangıç. Varsayılan her zaman ev dizini.
+    private var defaultCwd: String {
+        FileManager.default.homeDirectoryForCurrentUser.path
+    }
+
     private func openInitialSession() {
-        let cwd = FileManager.default.currentDirectoryPath
+        let cwd = defaultCwd
         open(cwd: cwd, template: .shell,
              name: SessionFactory.name(for: cwd, existing: store.sessions.map(\.name)))
     }
@@ -441,7 +442,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
 
     @objc func newSession(_ sender: Any?) {
         guard sheet == nil else { return }
-        let cwd = store.selected?.cwd ?? FileManager.default.currentDirectoryPath
+        let cwd = store.selected?.cwd ?? defaultCwd
         let view = NewSessionSheet(
             cwd: cwd,
             name: SessionFactory.name(for: cwd, existing: store.sessions.map(\.name)),
@@ -495,9 +496,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
 
     private func recentFolders() -> [String] {
         var list = UserDefaults.standard.stringArray(forKey: recentsKey) ?? []
-        let cwd = FileManager.default.currentDirectoryPath
-        if !list.contains(cwd) { list.append(cwd) }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        // Eski sürümler çalışma dizinini de biriktiriyordu, yani "/" listeye
+        // yazılmış olabilir; kalıntıyı temizliyoruz.
+        list.removeAll { $0 == "/" }
+        let home = defaultCwd
         if !list.contains(home) { list.append(home) }
         return list
     }
@@ -517,7 +519,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         let sidebarVC = NSHostingController(rootView: makeSidebar())
         let sidebar = NSSplitViewItem(viewController: sidebarVC)
         sidebar.minimumThickness = tier.width
-        sidebar.maximumThickness = tier == .wide ? 320 : tier.width
+        sidebar.maximumThickness = tier == .wide ? 380 : tier.width
         sidebar.canCollapse = false
         sidebar.holdingPriority = .init(260)
         sidebarItem = sidebar

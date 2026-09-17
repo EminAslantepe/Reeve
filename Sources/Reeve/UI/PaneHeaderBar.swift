@@ -11,7 +11,7 @@ struct PaneHeaderBar: View {
                 header(index)
             }
         }
-        .frame(height: 28)
+        .frame(height: 36)
         .background(Theme.rule)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.ruleSoft).frame(height: 1)
@@ -25,18 +25,18 @@ struct PaneHeaderBar: View {
             if let session {
                 StatusDot(status: session.status, origin: session.origin)
                 Text(session.name)
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(focused ? Theme.ink : Theme.ink2)
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 if let cost = session.costLabel {
                     Text(cost)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                         .monospacedDigit()
                         .foregroundStyle(Theme.ink3)
                 }
                 Text(trailing(session))
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(session.status.isWaiting ? Theme.wait : Theme.ink3)
                     .lineLimit(1)
             } else {
@@ -71,9 +71,9 @@ private struct CloseButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 8.5, weight: .bold))
+                .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(hovering ? Theme.ink : Theme.ink3)
-                .frame(width: 18, height: 18)
+                .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
                         .fill(hovering ? Color.white.opacity(0.1) : .clear))

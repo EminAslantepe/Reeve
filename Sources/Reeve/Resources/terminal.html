@@ -14,34 +14,13 @@
      doğru kurulur ne de fit() ölçebilir (UI.md D2). visibility:hidden ölçüyü korur. */
   .pane {
     position: absolute; top: 0; bottom: 0; left: 0; width: 100%;
-    padding: 6px 8px; box-sizing: border-box; background: #121215;
-    /* Sürüklerken panolar yer açıyor; geçiş olmadan sıçrayarak yerleşirlerdi.
-       Eğri yavaş biten bir expo-out: hareket sonunda yumuşuyor. */
-    transition: left .3s cubic-bezier(.16,1,.3,1), width .3s cubic-bezier(.16,1,.3,1);
+    box-sizing: border-box; background: #121215;
   }
-  /* Açılan boşluğun yerini gösteren tutucu. Panolardan SONRA ekleniyor ve
-     z-index taşıyor: aksi halde terminaller üstünü kapatıyordu. */
-  #gap {
-    position: absolute; top: 0; bottom: 0; z-index: 5;
-    padding: 6px; box-sizing: border-box;
-    opacity: 0; pointer-events: none;
-    transition: left .3s cubic-bezier(.16,1,.3,1),
-                width .3s cubic-bezier(.16,1,.3,1), opacity .2s ease;
-  }
-  #gap > i {
-    display: block; width: 100%; height: 100%;
-    border-radius: 8px;
-    border: 1px dashed #4a4a57;
-    background: rgba(255,255,255,.045);
-  }
-  #gap[data-on="1"] { opacity: 1; }
-  /* Panel tavanındayken hedef panelin sakin vurgusu — mavi kaplama değil,
-     yalnızca kenar. */
-  .pane[data-target="1"]::after {
-    content: ""; position: absolute; inset: 6px;
-    border-radius: 8px; border: 1px solid #6a6a77;
-    background: rgba(255,255,255,.04); pointer-events: none;
-  }
+  /* Kenar boşluğu panoya padding olarak VERİLEMİYOR: FitAddon ölçtüğü ebeveynin
+     yüksekliğini padding'i düşmeden okuyor (WebKit border-box değerini
+     döndürüyor), bir satır fazla hesaplayıp sonuncuyu panonun dışına taşırıyordu.
+     Boşluğu konumlandırmayla veriyoruz; ölçülen kutu = gerçekten kullanılabilir alan. */
+  .pane > .inner { position: absolute; top: 6px; bottom: 6px; left: 8px; right: 8px; }
   .pane[data-active="0"] { visibility: hidden; }
   .xterm-viewport::-webkit-scrollbar { width: 9px; }
   .xterm-viewport::-webkit-scrollbar-thumb { background: #31313a; border-radius: 5px; }
@@ -63,15 +42,6 @@
   const panes = new Map();   // id -> { term, fit, search, el, webgl, cols, rows }
   let activeID = null;
   let layout = [null];       // görünür slotlardaki oturum kimlikleri
-  let gapIndex = null;       // sürükleme sırasında açılan boşluğun yeri
-  let settleTimer = 0;       // geçiş bittikten sonraki yeniden ölçüm
-
-  // Tutucu panolardan sonra eklenir ki üstlerinde kalsın.
-  const gap = document.createElement("div");
-  gap.id = "gap";
-  gap.dataset.on = "0";
-  gap.appendChild(document.createElement("i"));
-  host.appendChild(gap);
 
   const send = (name, body) => {
     const h = window.webkit && window.webkit.messageHandlers;
@@ -93,10 +63,14 @@
 
   const OPTIONS = {
     fontFamily: '"SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-    fontSize: 12.5,
+    fontSize: 11,
     lineHeight: 1.35,
     cursorBlink: true,
     scrollback: 10000,
+    // xterm'in varsayılanı 1: her tekerlek olayı tek satır, trackpad'de
+    // ağır kalıyor. Alt basılıyken devreye giren fastScrollSensitivity (5)
+    // varsayılanında bırakıldı.
+    scrollSensitivity: 3,
     macOptionIsMeta: true,
     allowProposedApi: true,
     // "Center Ajan Konsolu" mockup'ının terminal paleti.
@@ -148,12 +122,16 @@
     box(el, 0, 100 / Math.max(layout.length, 1));   // gizli pano da ölçülebilir olmalı
     host.appendChild(el);
 
+    const inner = document.createElement("div");
+    inner.className = "inner";
+    el.appendChild(inner);
+
     const term = new Terminal(OPTIONS);
     const fit = new FitAddon.FitAddon();
     const search = new SearchAddon.SearchAddon();
     term.loadAddon(fit);
     term.loadAddon(search);
-    term.open(el);                       // eleman ölçülebilir: gizliyken de boyutu var
+    term.open(inner);                       // eleman ölçülebilir: gizliyken de boyutu var
 
     el.addEventListener("mousedown", () => send("focusPane", { id: id }), true);
     term.onData(d => send("input", { id: id, b64: toB64(encoder.encode(d)) }));
@@ -163,7 +141,7 @@
       send("input", { id: id, b64: toB64(u) });
     });
 
-    const rec = { term: term, fit: fit, search: search, el: el,
+    const rec = { term: term, fit: fit, search: search, el: el, inner: inner,
                   webgl: null, cols: 0, rows: 0 };
     panes.set(id, rec);
 
@@ -177,67 +155,28 @@
   // Panolar DOM'da taşınmıyor, sadece left/width değişiyor: canvas'ı yeniden
   // bağlamak WebGL bağlamını düşürürdü. Gizli panolar 0. slotun ölçüsünü alıyor,
   // görünür olduklarında zaten doğru boyutta oluyorlar (UI.md D9).
-  // Sürükleme sırasında açılan boşluk alanın **%20'si**. Panoları eşit dilimlere
-  // bölmek yarım sayfayı kaydırıyordu; burada panolar kalan %80'i paylaşıyor,
-  // yani iki panelde her biri yalnızca %10 daralıyor.
-  const GAP_SHARE = 20;
-
   function box(el, leftPercent, widthPercent) {
     el.style.left = "calc(" + leftPercent + "% + " + (leftPercent > 0 ? 1 : 0) + "px)";
     el.style.width = "calc(" + widthPercent + "% - " + (widthPercent < 100 ? 1 : 0) + "px)";
   }
 
   function place() {
-    const total = layout.length;
-    const open = gapIndex !== null;
-    const share = (open ? 100 - GAP_SHARE : 100) / Math.max(total, 1);
-
+    const share = 100 / Math.max(layout.length, 1);
     for (const [id, rec] of panes) {
-      const position = layout.indexOf(id);
-      const at = position < 0 ? 0 : position;
-      const offset = (open && at >= gapIndex) ? GAP_SHARE : 0;
-      box(rec.el, at * share + offset, share);
-    }
-    if (open) {
-      box(gap, gapIndex * share, GAP_SHARE);
-      gap.dataset.on = "1";
-    } else {
-      gap.dataset.on = "0";
+      const at = Math.max(layout.indexOf(id), 0);
+      box(rec.el, at * share, share);
     }
   }
 
-  /// Sürükleme sırasında: panolar yer açsın. `index === null` boşluğu kapatıyor.
-  window.reevePreview = function (index) {
-    gapIndex = index;
-    place();
-    // Boşluk açılırken terminalleri yeniden ölçmüyoruz: sürükleme birkaç yüz
-    // milisaniye sürüyor, her karede ioctl atmak süreçleri boşuna uyandırırdı.
-  };
-
-  /// Panel tavanındayken araya sıkıştırma yok; hedef panel vurgulanıyor.
-  window.reeveHighlight = function (id) {
-    for (const [key, rec] of panes) {
-      rec.el.dataset.target = (id && key === id) ? "1" : "0";
-    }
-  };
-
   window.reeveLayout = function (slots) {
     layout = Array.isArray(slots) && slots.length ? slots : [null];
-    gapIndex = null;
-    gap.dataset.on = "0";
     for (const [id, rec] of panes) {
       const visible = layout.indexOf(id) >= 0;
       rec.el.dataset.active = visible ? "1" : "0";
-      rec.el.dataset.target = "0";
       if (visible) { attachWebgl(rec); } else { detachWebgl(rec); }
     }
     place();
-    // İki kez ölçüyoruz. İlki anında, ikincisi geçiş bittikten sonra: yumuşak
-    // animasyon sürerken fit() aradaki genişliği ölçüp yanlış sütun sayısı
-    // buluyor ve terminal o boyutta kalıyordu.
     syncAll();
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(syncAll, 340);
   };
 
   window.reeveSelect = function (id) {

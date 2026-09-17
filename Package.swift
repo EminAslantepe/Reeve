@@ -13,6 +13,7 @@ let package = Package(
             name: "Reeve",
             path: "Sources/Reeve",
             resources: [.copy("Resources")]
-        )
+        ),
+        .testTarget(name: "ReeveTests", dependencies: ["Reeve"])
     ]
 )

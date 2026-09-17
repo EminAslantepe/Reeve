@@ -1,9 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// "Center Ajan Konsolu" mockup'ının renk ve ölçü sözlüğü.
-/// Değerler mockup'ın CSS değişkenlerinden birebir alındı; elle sayı uydurulmaz,
-/// bir renk değişecekse önce orada değişir.
+/// Koyu yüzeyler, okunabilir metin tonları ve ortak arayüz ölçüleri.
 enum Theme {
 
     // Yüzeyler
@@ -19,8 +17,8 @@ enum Theme {
 
     // Mürekkep
     static let ink  = Color(hex: 0xE6E6EA)        // --app-ink
-    static let ink2 = Color(hex: 0x9A9AA6)        // --app-ink-2
-    static let ink3 = Color(hex: 0x6A6A77)        // --app-ink-3
+    static let ink2 = Color(hex: 0xB4B4C0)        // --app-ink-2
+    static let ink3 = Color(hex: 0x90909F)        // --app-ink-3
 
     // Durum — renk TEK başına taşımıyor, biçimle birlikte (bkz. StatusDot)
     static let wait   = Color(hex: 0xE89440)      // --st-wait
@@ -43,7 +41,7 @@ enum Theme {
     static let paletteFoot   = Color(hex: 0x24242C)
 
     // Ölçüler
-    static let sidebarWidth: CGFloat = 268
+    static let sidebarWidth: CGFloat = 292
 
     static var nsPaletteBG: NSColor { NSColor(paletteBG) }
 
