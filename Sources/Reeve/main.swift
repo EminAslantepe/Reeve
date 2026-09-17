@@ -24,6 +24,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     private var cardView: NSHostingView<PaneOverlay>!
     private var findView: NSHostingView<FindBar>!
     private var sidebarItem: NSSplitViewItem!
+    private var sidebarSplitView: SidebarSplitView!
+    private var expandedSidebarWidth = Theme.sidebarWidth
     private var inspectorItem: NSSplitViewItem!
 
     private var tier = SidebarTier.stored
@@ -297,27 +299,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     }
 
     private func applyTier(_ next: SidebarTier) {
+        if tier == .wide, let view = sidebarItem?.viewController.view {
+            expandedSidebarWidth = max(view.frame.width, SidebarTier.minimumExpandedWidth)
+        }
         tier = next
         SidebarTier.stored = next
-        // Genişlerken önce üst sınırı aç; dar kademenin 64 px tavanıyla çakışmasın.
-        if next == .wide { sidebarItem.maximumThickness = 380 }
-        sidebarItem.minimumThickness = next.width
-        sidebarItem.maximumThickness = next == .wide ? 380 : next.width
-        sidebarItem.viewController.view.window?.layoutIfNeeded()
-        rebuildSidebar()
-        // Kademe değişimi bir boyut değişimidir: JS tarafı ResizeObserver ile
-        // yakalayıp her panoyu yeniden fit eder, her biri kendi ioctl'ini alır (D9).
+        let width = next == .narrow ? next.width : expandedSidebarWidth
+        sidebarSplitView.setPosition(SidebarTier.settledWidth(width), ofDividerAt: 0)
     }
 
-    private func rebuildSidebar() {
-        guard let controller = sidebarItem.viewController as? NSHostingController<SidebarView> else { return }
-        controller.rootView = makeSidebar()
+    private func settleSidebar(at width: CGFloat) {
+        let settled = SidebarTier.settledWidth(width)
+        tier = SidebarTier.fitting(width: settled)
+        SidebarTier.stored = tier
+        if tier == .wide { expandedSidebarWidth = settled }
+        sidebarSplitView.setPosition(settled, ofDividerAt: 0)
     }
 
     private func makeSidebar() -> SidebarView {
         SidebarView(store: store,
                     drag: drag,
-                    tier: tier,
                     onNew: { [weak self] in self?.newSession(nil) },
                     onAttach: { [weak self] in self?.attach($0) },
                     onResume: { [weak self] in self?.resume($0) },
@@ -329,7 +330,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     /// İki panelde her terminal yarı genişlikte kalıyor; dar alanda Claude'un TUI'si
     /// bozulur. Eşiğin altında bölmeye izin verilmiyor (UI.md D9).
     private var canSplit: Bool {
-        (window?.contentView?.bounds.width ?? 0) - tier.width > 760
+        (window?.contentView?.bounds.width ?? 0) - (sidebarItem?.viewController.view.frame.width ?? tier.width) > 760
     }
 
     @objc func togglePanes(_ sender: Any?) {
@@ -518,8 +519,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         // dayatıyor ve mockup'ın düz #212127 yüzeyini bozuyor.
         let sidebarVC = NSHostingController(rootView: makeSidebar())
         let sidebar = NSSplitViewItem(viewController: sidebarVC)
-        sidebar.minimumThickness = tier.width
-        sidebar.maximumThickness = tier == .wide ? 380 : tier.width
+        sidebar.minimumThickness = SidebarTier.narrow.width
+        sidebar.maximumThickness = SidebarTier.maximumWidth
         sidebar.canCollapse = false
         sidebar.holdingPriority = .init(260)
         sidebarItem = sidebar
@@ -569,9 +570,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         inspectorItem = inspectorSide
 
         let split = NSSplitViewController()
-        split.splitView.dividerStyle = .thin
+        let sidebarSplit = SidebarSplitView()
+        sidebarSplit.isVertical = true
+        sidebarSplit.dividerStyle = .thin
+        sidebarSplit.onSidebarResizeEnded = { [weak self] width in
+            self?.settleSidebar(at: width)
+        }
+        split.splitView = sidebarSplit
+        sidebarSplitView = sidebarSplit
         split.addSplitViewItem(sidebar)
-        split.addSplitViewItem(NSSplitViewItem(viewController: content))
+        let terminalItem = NSSplitViewItem(viewController: content)
+        terminalItem.minimumThickness = 360
+        split.addSplitViewItem(terminalItem)
         split.addSplitViewItem(inspectorSide)
 
         let root = NSViewController()
@@ -612,6 +622,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         // mockup'ın 40 px'lik çubuğu için sıkışık birleşik stil gerekiyor.
         window.toolbarStyle = .unifiedCompact
         window.center()
+        window.contentView?.layoutSubtreeIfNeeded()
+        sidebarSplitView.setPosition(tier.width, ofDividerAt: 0)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -626,7 +638,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     // MARK: - Araç çubuğu
 
     private static let sidebarItemID = NSToolbarItem.Identifier("sidebarTier")
-    private static let newSessionItem = NSToolbarItem.Identifier("newSession")
 
     private static let titleItemID = NSToolbarItem.Identifier("windowTitle")
 
@@ -636,7 +647,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     /// Pencere başlığı gizlenip araç çubuğuna taşındı; aksi halde macOS başlığı
     /// sola koyup bütün araç çubuğu öğelerini sağa itiyor.
     private var toolbarLayout: [NSToolbarItem.Identifier] {
-        [Self.sidebarItemID, Self.titleItemID, .flexibleSpace, Self.newSessionItem]
+        [Self.sidebarItemID, Self.titleItemID, .flexibleSpace]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -665,13 +676,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
             label.textColor = NSColor(Theme.ink2)
             item.view = label
             item.label = "Reeve"
-
-        case Self.newSessionItem:
-            item.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "Yeni oturum")
-            item.label = "Yeni oturum"
-            item.toolTip = "Yeni oturum (⌘N)"
-            item.target = self
-            item.action = #selector(newSession(_:))
 
         default:
             return nil

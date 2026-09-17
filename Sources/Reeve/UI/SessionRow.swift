@@ -11,7 +11,7 @@ struct SessionRow: View {
     let session: Session
     let isSelected: Bool
     var isFocused = false
-    @State private var hovering = false
+    var isHovered = false
 
     private var isAlarm: Bool {
         if case .waiting = session.status { return true }
@@ -20,14 +20,14 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            StatusDot(status: session.status, origin: session.origin)
-                .frame(width: 16)
+            SessionLeadingIcon(session: session)
+                .frame(width: 18)
                 .padding(.top, 4)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Text(session.name)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                     if session.hasUnseenOutput {
@@ -44,6 +44,8 @@ struct SessionRow: View {
                         .monospacedDigit()
                         .foregroundStyle(isAlarm ? Theme.wait : Theme.ink3)
                         .fixedSize()
+                        .frame(width: 46, alignment: .trailing)
+                        .opacity(isHovered ? 0 : 1)
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -57,11 +59,10 @@ struct SessionRow: View {
         }
         .padding(.leading, 7)
         .padding(.trailing, 7)
-        .padding(.top, 9)
-        .padding(.bottom, 9)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
         .background(background)
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
         .help("\(session.name) · \(session.displayCwd)")
     }
 
@@ -106,11 +107,13 @@ struct SessionRow: View {
 
     private var fillColor: Color {
         if isAlarm { return Theme.wait.opacity(0.11) }
-        return isSelected ? Theme.selection : hovering ? Theme.choiceOn.opacity(0.55) : .clear
+        return isSelected ? Theme.selection : isHovered ? Theme.choiceOn : .clear
     }
 
     private var strokeColor: Color {
-        isAlarm ? Theme.wait.opacity(0.26) : isFocused ? Theme.busy.opacity(0.4) : .clear
+        isAlarm ? Theme.wait.opacity(0.26)
+            : isFocused ? Theme.primary.opacity(0.5)
+            : isHovered ? Theme.primary.opacity(0.28) : .clear
     }
 }
 

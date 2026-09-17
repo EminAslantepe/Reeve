@@ -69,19 +69,64 @@ final class SessionReorderTests: XCTestCase {
         }
     }
 
-    func testMouseUpKeepsSourceAvailableForDropAndOldExitKeepsCurrentTarget() async {
+    func testLiveReorderHappensBeforeReleaseAndDoesNotOscillate() async {
         await MainActor.run {
+            let (store, rows) = fixture()
             let drag = DragState()
-            let source = UUID(), oldTarget = UUID(), newTarget = UUID()
-            drag.begin(source)
-            defer { drag.end() }
-            drag.hover(row: oldTarget, placement: .before)
-            drag.hover(row: newTarget, placement: .after)
-            drag.leave(row: oldTarget)
-            XCTAssertEqual(drag.rowTarget?.id, newTarget)
-            XCTAssertEqual(drag.rowTarget?.placement, .after)
-            drag.scheduleEnd()
-            XCTAssertEqual(drag.sessionID, source)
+            drag.begin(rows[0].id, store: store)
+            drag.preview(over: rows[1], y: 20, height: 60)
+            XCTAssertEqual(store.sessions.map(\.id), rows.map(\.id))
+            drag.preview(over: rows[1], y: 40, height: 60)
+            XCTAssertEqual(store.sessions.map(\.id), [rows[1].id, rows[0].id, rows[2].id])
+            drag.preview(over: rows[1], y: 40, height: 60)
+            XCTAssertEqual(store.sessions.map(\.id), [rows[1].id, rows[0].id, rows[2].id])
+            XCTAssertEqual(drag.sessionID, rows[0].id)
+            XCTAssertTrue(drag.canDrop(on: rows[0])) // Taşınmış boş kutuya bırakma geçerli.
+            drag.acceptSidebarDrop()
+            drag.end(accepted: true)
+            XCTAssertEqual(store.sessions.map(\.id), [rows[1].id, rows[0].id, rows[2].id])
+            XCTAssertFalse(drag.isActive)
+        }
+    }
+
+    func testLiveReorderMovesUpAndCanReverseDirection() async {
+        await MainActor.run {
+            let (store, rows) = fixture()
+            let drag = DragState()
+            drag.begin(rows[2].id, store: store)
+            drag.preview(over: rows[1], y: 10, height: 60)
+            XCTAssertEqual(store.sessions.map(\.id), [rows[0].id, rows[2].id, rows[1].id])
+            drag.preview(over: rows[1], y: 50, height: 60)
+            XCTAssertEqual(store.sessions.map(\.id), rows.map(\.id))
+            drag.end()
+        }
+    }
+
+    func testCancelledDragRestoresOrderButPreservesSessionsAddedDuringDrag() async {
+        await MainActor.run {
+            let (store, rows) = fixture()
+            let drag = DragState()
+            drag.begin(rows[0].id, store: store)
+            drag.preview(over: rows[2], y: 55, height: 60)
+            let added = Session(name: "New", cwd: "/tmp/project", kind: .shell,
+                                claudeSessionID: UUID(), launch: nil)
+            store.add(added)
+            drag.end()
+            XCTAssertEqual(store.sessions.map(\.id), rows.map(\.id) + [added.id])
+        }
+    }
+
+    func testTerminalDropDoesNotCommitTemporarySidebarOrder() async {
+        await MainActor.run {
+            let (store, rows) = fixture()
+            let drag = DragState()
+            drag.begin(rows[0].id, store: store)
+            drag.preview(over: rows[2], y: 55, height: 60)
+            store.insert(rows[0].id, at: 0)
+            let panes = store.panes
+            drag.end(accepted: true)
+            XCTAssertEqual(store.sessions.map(\.id), rows.map(\.id))
+            XCTAssertEqual(store.panes, panes)
         }
     }
 }

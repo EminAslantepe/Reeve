@@ -29,12 +29,6 @@ struct PaneHeaderBar: View {
                     .foregroundStyle(focused ? Theme.ink : Theme.ink2)
                     .lineLimit(1)
                 Spacer(minLength: 6)
-                if let cost = session.costLabel {
-                    Text(cost)
-                        .font(.system(size: 12, design: .monospaced))
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.ink3)
-                }
                 Text(trailing(session))
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(session.status.isWaiting ? Theme.wait : Theme.ink3)
@@ -53,6 +47,9 @@ struct PaneHeaderBar: View {
         .padding(.trailing, store.paneCount > 1 ? 6 : 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(focused ? Theme.choiceOn : Theme.control)
+        .overlay(alignment: .bottom) {
+            if focused { Rectangle().fill(Theme.primary.opacity(0.65)).frame(height: 2) }
+        }
         .contentShape(Rectangle())
         .onTapGesture { store.focusPane(index) }
     }

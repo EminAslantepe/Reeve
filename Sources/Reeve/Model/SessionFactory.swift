@@ -68,7 +68,8 @@ enum SessionFactory {
             paneID: paneID,
             launch: .init(executable: shell,
                           args: ["-l", "-c", "claude attach '\(shortID)'; exec '\(shell)' -i"],
-                          env: env))
+                          env: env),
+            customName: agent.customName)
     }
 
     /// Kaydedilmiş bir oturumu `claude --resume` ile geri getirir.
@@ -93,7 +94,8 @@ enum SessionFactory {
                        origin: .center,
                        claudeSessionID: sessionID,
                        paneID: paneID,
-                       launch: .init(executable: shell, args: args, env: env))
+                       launch: .init(executable: shell, args: args, env: env),
+                       customName: saved.customName)
     }
 
     /// Harici bir oturumun **konuşmasını** Reeve'de sürdürür.
@@ -116,7 +118,8 @@ enum SessionFactory {
             paneID: paneID,
             launch: .init(executable: shell,
                           args: ["-l", "-c", "claude --resume '\(id)'; exec '\(shell)' -i"],
-                          env: env))
+                          env: env),
+            customName: session.customName)
     }
 
     static func make(template: Template, cwd: String, name: String) -> Session {

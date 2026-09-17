@@ -67,6 +67,7 @@ final class Session: Identifiable {
     let paneID: UUID
 
     var name: String
+    var customName: String?
     var cwd: String
     let kind: Kind
     var origin: Origin
@@ -99,8 +100,10 @@ final class Session: Identifiable {
          origin: Origin = .center,
          claudeSessionID: UUID,
          paneID: UUID = UUID(),
-         launch: Launch?) {
-        self.name = name
+         launch: Launch?,
+         customName: String? = nil) {
+        self.name = customName ?? name
+        self.customName = customName
         self.cwd = cwd
         self.kind = kind
         self.origin = origin

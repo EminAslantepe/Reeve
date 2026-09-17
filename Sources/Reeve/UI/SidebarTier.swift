@@ -16,6 +16,19 @@ enum SidebarTier: String, CaseIterable {
         }
     }
 
+    static let compactThreshold: CGFloat = 160
+    static let minimumExpandedWidth: CGFloat = 208
+    static let maximumWidth: CGFloat = 280
+
+    static func fitting(width: CGFloat) -> SidebarTier {
+        width < compactThreshold ? .narrow : .wide
+    }
+
+    static func settledWidth(_ width: CGFloat) -> CGFloat {
+        fitting(width: width) == .narrow ? SidebarTier.narrow.width
+            : min(max(width, minimumExpandedWidth), maximumWidth)
+    }
+
     var next: SidebarTier { self == .wide ? .narrow : .wide }
 
     var symbol: String {
@@ -31,18 +44,34 @@ enum SidebarTier: String, CaseIterable {
     }
 }
 
-/// Dar kademede isimlerin son birkaç karakteri gösteriliyor (`center-9f` → `9f`).
-/// Çakışma mümkün: `center-9f` ve `project-9f` ikisi de `9f` olurdu — o yüzden
-/// kısaltma üretici çakışmayı görüp uzunluğu artırıyor (D10).
+/// Karelerde isim baş harfleri; çakışırsa daha uzun bir kısaltma kullanılır.
 enum Abbreviator {
-    static func suffixes(for names: [String]) -> [String] {
-        guard names.count > 1 else {
-            return names.map { String($0.suffix(2)) }
+    static func labels(for names: [String]) -> [String] {
+        let words = names.map { $0.split { !$0.isLetter && !$0.isNumber } }
+        let roots = words.map { $0.joined().uppercased() }
+        var labels = words.map { parts -> String in
+            guard let first = parts.first else { return "•" }
+            if parts.count > 1, let last = parts.last {
+                return (String(first.prefix(1)) + String(last.prefix(1))).uppercased()
+            }
+            return String(first.prefix(2)).uppercased()
         }
-        for length in 2...6 {
-            let candidates = names.map { String($0.suffix(length)) }
-            if Set(candidates).count == candidates.count { return candidates }
+        for length in 3...4 {
+            let counts = Dictionary(grouping: labels, by: { $0 }).mapValues(\.count)
+            for index in labels.indices where counts[labels[index], default: 0] > 1 {
+                labels[index] = String(roots[index].prefix(length))
+            }
         }
-        return names.map { String($0.suffix(6)) }
+        var used: Set<String> = []
+        for index in labels.indices {
+            let base = labels[index]
+            var number = 2
+            while used.contains(labels[index]) {
+                labels[index] = String(base.prefix(2)) + String(number)
+                number += 1
+            }
+            used.insert(labels[index])
+        }
+        return labels
     }
 }

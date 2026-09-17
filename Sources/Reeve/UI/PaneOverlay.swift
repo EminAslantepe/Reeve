@@ -20,7 +20,6 @@ struct PaneOverlay: View {
                         } else {
                             store.select(id, in: slot)
                         }
-                        drag.end()
                         return true
                     }
                 }

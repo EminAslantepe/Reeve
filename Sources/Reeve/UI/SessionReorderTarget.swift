@@ -1,7 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Geniş satır ve dar çip aynı bırakma geometrisini ve geri bildirimi kullanır.
 struct SessionReorderTarget: ViewModifier {
     let session: Session
     let store: SessionStore
@@ -17,24 +16,14 @@ struct SessionReorderTarget: ViewModifier {
                         .onChange(of: geometry.size.height) { _, value in height = value }
                 }
             }
-            .overlay(alignment: drag.rowTarget?.placement == .after ? .bottom : .top) {
-                if drag.rowTarget?.id == session.id {
-                    Capsule()
-                        .fill(Theme.ink2.opacity(0.75))
-                        .frame(height: 2)
-                        .padding(.horizontal, 8)
-                        .allowsHitTesting(false)
-                }
-            }
             .onDrop(of: [UTType.text], delegate: SessionReorderDelegate(
-                session: session, store: store, drag: drag, height: height))
+                session: session, drag: drag, height: height))
     }
 }
 
-/// Üst yarı → önüne, alt yarı → arkasına. Son satırın altı da geçerli hedeftir.
+/// Yer değiştirme hover sırasında tamamlanır; bırakırken ikinci kez taşıma yok.
 struct SessionReorderDelegate: DropDelegate {
     let session: Session
-    let store: SessionStore
     let drag: DragState
     let height: CGFloat
 
@@ -42,38 +31,26 @@ struct SessionReorderDelegate: DropDelegate {
         y < height / 2 ? .before : .after
     }
 
-    private var canMove: Bool {
-        guard let id = drag.sessionID, id != session.id,
-              let source = store.session(id) else { return false }
-        return source.cwd == session.cwd && source.status.isWaiting == session.status.isWaiting
-    }
-
     func validateDrop(info: DropInfo) -> Bool {
-        canMove && info.hasItemsConforming(to: [UTType.text])
+        drag.canDrop(on: session) && info.hasItemsConforming(to: [UTType.text])
     }
 
-    func dropEntered(info: DropInfo) { updateTarget(info) }
+    func dropEntered(info: DropInfo) { update(info) }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard canMove else { return DropProposal(operation: .forbidden) }
-        updateTarget(info)
+        guard drag.canDrop(on: session) else { return DropProposal(operation: .forbidden) }
+        update(info)
         return DropProposal(operation: .move)
     }
 
-    func dropExited(info: DropInfo) { drag.leave(row: session.id) }
-
     func performDrop(info: DropInfo) -> Bool {
-        guard canMove, let id = drag.sessionID else { return false }
-        store.move(id, relativeTo: session.id,
-                   placement: Self.placement(at: info.location.y, height: height))
-        drag.end()
-        // Zaten aynı konumdaysa da bırakmayı kabul et; geri dönüş animasyonu yapma.
+        guard drag.canDrop(on: session) else { return false }
+        update(info)
+        drag.acceptSidebarDrop()
         return true
     }
 
-    private func updateTarget(_ info: DropInfo) {
-        guard canMove else { return }
-        drag.hover(row: session.id,
-                   placement: Self.placement(at: info.location.y, height: height))
+    private func update(_ info: DropInfo) {
+        drag.preview(over: session, y: info.location.y, height: height)
     }
 }

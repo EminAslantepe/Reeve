@@ -12,6 +12,7 @@ struct SavedSession: Codable, Equatable {
     var cwd: String
     var isClaude: Bool
     var claudeSessionID: String
+    var customName: String? = nil
 }
 
 @MainActor
@@ -25,7 +26,8 @@ enum SessionRestore {
                 SavedSession(name: $0.name,
                              cwd: $0.cwd,
                              isClaude: $0.kind == .claude,
-                             claudeSessionID: $0.claudeSessionID.uuidString)
+                             claudeSessionID: $0.claudeSessionID.uuidString,
+                             customName: $0.customName)
             }
         guard let data = try? JSONEncoder().encode(saved) else { return }
         UserDefaults.standard.set(data, forKey: key)

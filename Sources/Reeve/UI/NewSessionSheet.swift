@@ -191,7 +191,7 @@ private struct SheetButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12.5, weight: primary ? .medium : .regular))
-            .foregroundStyle(primary ? Color.white : Theme.ink)
+            .foregroundStyle(primary ? Theme.appBG : Theme.ink)
             .padding(.horizontal, 13)
             .frame(height: 26)
             .background(RoundedRectangle(cornerRadius: 6)

@@ -134,7 +134,7 @@ final class SessionStore {
                     session.status = after
                     transitions.append(Transition(session: session, from: before, to: after))
                 }
-                session.name = record.name
+                if session.customName == nil { session.name = record.name }
                 session.reportedPID = record.pid
                 session.shortID = record.id
                 if session.origin != .center {
@@ -368,6 +368,23 @@ final class SessionStore {
         reordered.insert(source, at: index + (placement == .after ? 1 : 0))
         guard reordered.map(\.id) != sessions.map(\.id) else { return false }
         sessions = reordered
+        return true
+    }
+
+    /// İptal edilen canlı sıralamayı geri al; bu sırada eklenen/kapanan oturumları koru.
+    func restoreOrder(_ ids: [Session.ID]) {
+        let byID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        let known = Set(ids)
+        let restored = ids.compactMap { byID[$0] } + sessions.filter { !known.contains($0.id) }
+        if restored.map(\.id) != sessions.map(\.id) { sessions = restored }
+    }
+
+    @discardableResult
+    func rename(_ session: Session, to name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, sessions.contains(where: { $0.id == session.id }) else { return false }
+        session.customName = trimmed
+        session.name = trimmed
         return true
     }
 

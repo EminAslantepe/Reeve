@@ -6,26 +6,39 @@ import SwiftUI
 struct SidebarView: View {
     let store: SessionStore
     let drag: DragState
-    let tier: SidebarTier
     let onNew: () -> Void
     let onAttach: (Session) -> Void
     let onResume: (Session) -> Void
     let onStop: (Session) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hoveredSessionID: Session.ID?
+    @State private var renamingSession: Session?
     @State private var query = ""
     @State private var collapsedFolders: Set<String> = []
     @State private var expandedSessions: Set<UUID> = []
 
     var body: some View {
-        Group {
-            switch tier {
-            case .wide:   wide
-            case .narrow: narrow
+        GeometryReader { geometry in
+            Group {
+                switch SidebarTier.fitting(width: geometry.size.width) {
+                case .wide:   wide
+                case .narrow: narrow
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onChange(of: SidebarTier.fitting(width: geometry.size.width)) { _, next in
+                if next == .narrow { query = "" }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.sidebar)
+        .tint(Theme.primary)
+        .sheet(item: $renamingSession) { session in
+            RenameSessionSheet(name: session.name, onCancel: { renamingSession = nil }) { name in
+                store.rename(session, to: name)
+                renamingSession = nil
+            }
+        }
     }
 
     // MARK: - Geniş
@@ -37,7 +50,7 @@ struct SidebarView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if !waiting.isEmpty {
-                        SectionLabel(title: "Yanıt bekleyenler", count: waiting.count, git: nil, alarm: true)
+                        SectionLabel(title: "Yanıt bekleyenler", count: waiting.count, alarm: true)
                         ForEach(waiting) { row($0) }
                     }
                     ForEach(visibleGroups, id: \.cwd) { group in
@@ -47,7 +60,7 @@ struct SidebarView: View {
                             }
                         } label: {
                             SectionLabel(title: group.title, count: group.sessions.count,
-                                         git: group.git, alarm: false,
+                                         alarm: false,
                                          collapsed: collapsedFolders.contains(group.cwd) && query.isEmpty)
                         }
                         .buttonStyle(.plain)
@@ -70,61 +83,58 @@ struct SidebarView: View {
     // MARK: - Dar
 
     private var narrow: some View {
-        ScrollView {
-            VStack(spacing: 4) {
-                ForEach(chips) { chip in
-                    switch chip {
-                    case .rule:
-                        Rectangle().fill(Theme.ruleSoft)
-                            .frame(width: 30, height: 1).padding(.vertical, 4)
-                    case .session(let session, let tag):
-                        chipView(session, tag: tag)
+        VStack(spacing: 0) {
+            newSessionButton(compact: true)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(chips) { chip in
+                        switch chip {
+                        case .rule:
+                            Rectangle().fill(Theme.rule)
+                                .frame(width: 20, height: 1).padding(.vertical, 2)
+                        case .session(let session, let tag):
+                            chipView(session, tag: tag)
+                        }
                     }
                 }
+                .animation(reorderAnimation, value: store.sessions.map(\.id))
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity)
             }
-            .animation(reorderAnimation, value: store.sessions.map(\.id))
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
+            .scrollIndicators(.hidden)
         }
     }
 
     private func chipView(_ session: Session, tag: String) -> some View {
-        let selected = store.pane(of: session.id) != nil
-        return VStack(spacing: 4) {
-            StatusDot(status: session.status, origin: session.origin)
-            Text(tag)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(session.status.isWaiting ? Theme.wait
-                                 : selected ? Theme.ink : Theme.ink3)
-        }
-        .frame(width: 44)
-        .padding(.vertical, 5)
-        .background(chipBackground(session, selected: selected))
-        .contentShape(Rectangle())
-        .opacity(drag.sessionID == session.id ? 0 : 1)
-        .animation(drag.isActive || reduceMotion ? nil : .easeOut(duration: 0.16), value: drag.sessionID)
-        .overlay { dragPlaceholder(for: session) }
-        .onTapGesture { store.select(session.id) }
-        .onDrag {
-            drag.begin(session.id)
-            return NSItemProvider(object: session.id.uuidString as NSString)
-        } preview: {
-            SessionDragPreview(session: session)
-        }
-        .modifier(SessionReorderTarget(session: session, store: store, drag: drag))
-        .contextMenu { menu(session) }
-        .help("\(session.name) · \(session.displayCwd)")
-    }
-
-    @ViewBuilder
-    private func chipBackground(_ session: Session, selected: Bool) -> some View {
-        if session.status.isWaiting {
-            RoundedRectangle(cornerRadius: 7).fill(Theme.wait.opacity(0.13))
-                .overlay(RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(Theme.wait.opacity(0.3), lineWidth: 1))
-        } else if selected {
-            RoundedRectangle(cornerRadius: 7).fill(Theme.selection)
-        }
+        let hovered = hoveredSessionID == session.id && !drag.isActive
+        return SessionChip(session: session, tag: tag,
+                    selected: store.pane(of: session.id) != nil,
+                    focused: store.selectedID == session.id, isHovered: hovered)
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+            .opacity(drag.sessionID == session.id ? 0 : 1)
+            .animation(nil, value: drag.sessionID)
+            .overlay { dragPlaceholder(for: session) }
+            .overlay {
+                SessionDragSource(session: session, store: store, drag: drag,
+                                  actionArea: hovered ? CGSize(width: 44, height: 21) : .zero,
+                                  onHover: { setHover($0, for: session) }) {
+                    SessionChip(session: session, tag: tag, selected: true, focused: true)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                rowActions(session, compact: true)
+                    .padding(2)
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
+                    .accessibilityHidden(!hovered)
+            }
+            .onHover { setHover($0, for: session) }
+            .modifier(SessionReorderTarget(session: session, store: store, drag: drag))
+            .contextMenu { menu(session) }
+            .help("\(session.name) · \(session.displayCwd)")
+            .accessibilityLabel(session.name)
     }
 
     /// Dar/kapalı kademenin düz listesi: önce bekleyenler, sonra gruplar, aralarda çizgi.
@@ -148,7 +158,7 @@ struct SidebarView: View {
         ordered.append(contentsOf: visibleGroups.map(\.sessions))
 
         let flat = ordered.flatMap { $0 }
-        let tags = Abbreviator.suffixes(for: flat.map(\.name))
+        let tags = Abbreviator.labels(for: flat.map(\.name))
         var index = 0
         var out: [Chip] = []
         for (position, bucket) in ordered.enumerated() {
@@ -182,32 +192,36 @@ struct SidebarView: View {
     // MARK: - Parçalar
 
     private var reorderAnimation: Animation? {
-        reduceMotion ? nil : .smooth(duration: 0.22, extraBounce: 0)
+        reduceMotion ? nil : .easeOut(duration: 0.1)
     }
 
     private var sidebarHeader: some View {
         HStack {
             Text("Oturumlar")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.ink)
             Text("\(store.sessions.count)")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.ink2)
             Spacer()
-            Button(action: onNew) {
-                Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.ink)
-                    .frame(width: 28, height: 28)
-                    .background(Theme.button, in: RoundedRectangle(cornerRadius: 7))
-            }
-            .buttonStyle(.plain)
-            .help("Yeni oturum (⌘N)")
-            .accessibilityLabel("Yeni oturum")
+            newSessionButton(compact: false)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 14)
+        .padding(.top, 10)
         .padding(.bottom, 4)
+    }
+
+    private func newSessionButton(compact: Bool) -> some View {
+        Button(action: onNew) {
+            Image(systemName: "plus")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.primary)
+                .frame(width: compact ? 36 : 28, height: compact ? 36 : 28)
+                .background(Theme.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .help("Yeni oturum (⌘N)")
+        .accessibilityLabel("Yeni oturum")
     }
 
     private var searchField: some View {
@@ -215,7 +229,7 @@ struct SidebarView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Theme.ink3)
-            TextField("Oturum veya klasör ara", text: $query)
+            TextField("Oturum ara…", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.ink)
@@ -229,7 +243,7 @@ struct SidebarView: View {
             }
         }
         .padding(.horizontal, 8)
-        .frame(height: 34)
+        .frame(height: 30)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(Theme.searchBG)
@@ -243,22 +257,33 @@ struct SidebarView: View {
     @ViewBuilder
     private func row(_ session: Session) -> some View {
         let shown = store.pane(of: session.id) != nil
+        let hovered = hoveredSessionID == session.id && !drag.isActive
         VStack(alignment: .leading, spacing: 0) {
-            SessionRow(session: session, isSelected: shown, isFocused: store.selectedID == session.id)
+            SessionRow(session: session, isSelected: shown,
+                       isFocused: store.selectedID == session.id, isHovered: hovered)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
                 // Satırın ölçüsü korunur; içerik yalnızca taşınan kartta görünür.
                 .opacity(drag.sessionID == session.id ? 0 : 1)
-                .animation(drag.isActive || reduceMotion ? nil : .easeOut(duration: 0.16), value: drag.sessionID)
+                .animation(nil, value: drag.sessionID)
                 .overlay { dragPlaceholder(for: session).padding(.horizontal, 6) }
-                .onTapGesture { store.select(session.id) }
-                .contextMenu { menu(session) }
-                .onDrag {
-                    drag.begin(session.id)
-                    return NSItemProvider(object: session.id.uuidString as NSString)
-                } preview: {
-                    SessionDragPreview(session: session)
+                .overlay {
+                    SessionDragSource(session: session, store: store, drag: drag,
+                                      actionArea: hovered ? CGSize(width: 62, height: 30) : .zero,
+                                      onHover: { setHover($0, for: session) }) {
+                        SessionDragPreview(session: session)
+                    }
                 }
+                .overlay(alignment: .topTrailing) {
+                    rowActions(session, compact: false)
+                        .padding(.trailing, 11)
+                        .padding(.top, 5)
+                        .opacity(hovered ? 1 : 0)
+                        .allowsHitTesting(hovered)
+                        .accessibilityHidden(!hovered)
+                }
+                .onHover { setHover($0, for: session) }
+                .contextMenu { menu(session) }
                 .modifier(SessionReorderTarget(session: session, store: store, drag: drag))
 
             // Alt öğeler yalnızca panelde duran oturumda — her satırda göstermek
@@ -295,6 +320,20 @@ struct SidebarView: View {
         }
     }
 
+    private func setHover(_ inside: Bool, for session: Session) {
+        if inside { hoveredSessionID = session.id }
+        else if hoveredSessionID == session.id { hoveredSessionID = nil }
+    }
+
+    private func rowActions(_ session: Session, compact: Bool) -> some View {
+        SessionActionBar(session: session, compact: compact,
+                         onRename: { renamingSession = session },
+                         onClose: {
+                             if session.hasTerminal { store.close(session) }
+                             else { store.remove(session) }
+                         })
+    }
+
     @ViewBuilder
     private func dragPlaceholder(for session: Session) -> some View {
         if drag.sessionID == session.id {
@@ -329,6 +368,8 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func menu(_ session: Session) -> some View {
+        Button("Yeniden adlandır…") { renamingSession = session }
+        Divider()
         Button("Odaklan") { store.select(session.id) }
         Button("İkinci panelde aç") { store.sendToSecondPane(session.id) }
         Divider()
@@ -391,11 +432,10 @@ private struct SubItemRow: View {
     }
 }
 
-/// Bölüm başlığı: `ETİKET ──────── main ●3 ↑2`
+/// Klasör adı, açma/kapama oku ve oturum sayısı.
 private struct SectionLabel: View {
     let title: String
     let count: Int?
-    let git: GitState?
     let alarm: Bool
     var collapsed = false
 
@@ -405,10 +445,6 @@ private struct SectionLabel: View {
                 Image(systemName: alarm ? "exclamationmark.bubble" : (collapsed ? "chevron.right" : "chevron.down"))
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 12)
-                if !alarm {
-                    Image(systemName: "folder")
-                        .font(.system(size: 12))
-                }
                 Text(title)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
@@ -422,37 +458,11 @@ private struct SectionLabel: View {
                 }
             }
             .foregroundStyle(alarm ? Theme.wait : Theme.ink2)
-            if let git { GitBadge(state: git).padding(.leading, 19) }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 16)
-        .padding(.bottom, 8)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
         .contentShape(Rectangle())
-    }
-}
-
-/// `main ●3 ↑2` — branch · commit'lenmemiş dosya · push edilmemiş commit.
-private struct GitBadge: View {
-    let state: GitState
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Text(state.branch)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.ink2)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if state.dirty > 0 {
-                Text("●\(state.dirty)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Theme.wait)
-            }
-            if state.ahead > 0 {
-                Text("↑\(state.ahead)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Theme.ink3)
-            }
-        }
     }
 }
 
@@ -462,8 +472,8 @@ private struct SessionDragPreview: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            StatusDot(status: session.status, origin: session.origin)
-                .frame(width: 16)
+            SessionLeadingIcon(session: session)
+                .frame(width: 18)
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.name)
                     .font(.system(size: 14, weight: .semibold))
@@ -481,10 +491,99 @@ private struct SessionDragPreview: View {
                 .foregroundStyle(Theme.ink2)
         }
         .padding(12)
-        .frame(width: 264, alignment: .leading)
+        .frame(width: 220, alignment: .leading)
         .background(Theme.paletteBG, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
             .strokeBorder(Theme.busy.opacity(0.55), lineWidth: 1))
         .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
+    }
+}
+
+/// Kompakt oturum ve sürükleme önizlemesi aynı kareyi kullanır.
+private struct SessionChip: View {
+    let session: Session
+    let tag: String
+    let selected: Bool
+    let focused: Bool
+    var isHovered = false
+
+    var body: some View {
+        Text(tag)
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundStyle(focused ? Theme.primary : Theme.ink)
+            .offset(y: 4)
+            .padding(.horizontal, 4)
+            .frame(width: 44, height: 44)
+            .background(selected ? Theme.selection : isHovered ? Theme.choiceOn : Theme.control,
+                        in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9)
+                .strokeBorder(focused ? Theme.primary.opacity(0.55) : isHovered ? Theme.primary.opacity(0.35) : Theme.ruleSoft, lineWidth: 1))
+            .overlay(alignment: .topLeading) {
+                if session.kind == .claude {
+                    ClaudeMark().fill(Theme.primary)
+                        .frame(width: 9, height: 9)
+                        .padding(4)
+                        .opacity(isHovered ? 0 : 1)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                StatusDot(status: session.status, origin: session.origin)
+                    .scaleEffect(0.65)
+                    .frame(width: 10, height: 10)
+                    .padding(3)
+                    .opacity(isHovered ? 0 : 1)
+            }
+    }
+}
+
+/// Satırın sağ üstündeki hızlı kontroller. Kapsayıcı hover olduğunda görünür;
+/// her düğme de kendi hover yüzeyini değiştirerek tıklanabilir olduğunu belli eder.
+private struct SessionActionBar: View {
+    let session: Session
+    let compact: Bool
+    let onRename: () -> Void
+    let onClose: () -> Void
+    @State private var hoveredAction: Action?
+
+    private enum Action: Hashable { case menu, close }
+
+    var body: some View {
+        HStack(spacing: 1) {
+            Button(action: onRename) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: compact ? 10 : 11, weight: .bold))
+                    .foregroundStyle(hoveredAction == .menu ? Theme.ink : Theme.primary)
+                    .frame(width: compact ? 21 : 25, height: compact ? 21 : 25)
+                    .background(hoveredAction == .menu ? Theme.primary.opacity(0.22) : .clear,
+                                in: RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .onHover { hoveredAction = $0 ? .menu : nil }
+            .help("Oturumu yeniden adlandır")
+            .accessibilityLabel("Oturumu yeniden adlandır")
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: compact ? 9 : 10, weight: .bold))
+                    .foregroundStyle(hoveredAction == .close ? Theme.ink : Theme.error)
+                    .frame(width: compact ? 21 : 25, height: compact ? 21 : 25)
+                    .background(hoveredAction == .close ? Theme.error.opacity(0.22) : .clear,
+                                in: RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .onHover { hoveredAction = $0 ? .close : nil }
+            .help(session.hasTerminal ? "Oturumu kapat" : "Listeden çıkar")
+            .accessibilityLabel(session.hasTerminal ? "Oturumu kapat" : "Listeden çıkar")
+        }
+        .padding(2)
+        .foregroundStyle(Theme.ink2)
+        .background(Theme.control, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
+            .strokeBorder(Theme.ruleSoft.opacity(hoveredAction == nil ? 0.9 : 1), lineWidth: 1))
+        .fixedSize(horizontal: true, vertical: true)
+        .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+        .animation(.easeOut(duration: 0.1), value: hoveredAction)
     }
 }
