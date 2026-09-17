@@ -147,12 +147,10 @@ final class SessionStore {
 
         for session in vanished { remove(session) }
 
-        // Reeve'in açmadıkları — iTerm'de elle açılmışlar ve arka plan ajanları.
-        for record in byID.values {
-            let session = Session(discovered: record)
-            sessions.append(session)
-            transitions.append(Transition(session: session, from: .live, to: session.status))
-        }
+        // Reeve'in açmadıkları sidebar'a **girmiyor**: ne başka terminalde elle
+        // açılmış oturumlar ne de arka plan ajanları. Yoklamanın buradaki tek işi
+        // kendi oturumlarımızın durumunu tazelemek. Geri almak için: eşleşmeyen
+        // her `byID` kaydından `Session(discovered:)` üretip listeye eklemek yeter.
 
         if !transitions.isEmpty { onTransitions?(transitions) }
     }
@@ -354,15 +352,23 @@ final class SessionStore {
         if let session = selected { onSelect?(session) }
     }
 
-    /// Sidebar'da sürükleyerek sıra değiştirme.
-    func move(_ id: Session.ID, before target: Session.ID?) {
-        guard id != target, let from = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let session = sessions.remove(at: from)
-        if let target, let to = sessions.firstIndex(where: { $0.id == target }) {
-            sessions.insert(session, at: to)
-        } else {
-            sessions.append(session)
-        }
+    enum RowPlacement { case before, after }
+
+    /// Kaynak çıkarıldıktan sonra hedefi bul: aşağı taşırken indeks kayması olmaz.
+    /// Tek dizi ataması, SwiftUI'nin aradaki eksik satır durumunu çizmesini önler.
+    @discardableResult
+    func move(_ id: Session.ID, relativeTo target: Session.ID,
+              placement: RowPlacement) -> Bool {
+        guard id != target,
+              let source = session(id), let destination = session(target),
+              source.cwd == destination.cwd,
+              source.status.isWaiting == destination.status.isWaiting else { return false }
+        var reordered = sessions.filter { $0.id != id }
+        guard let index = reordered.firstIndex(where: { $0.id == target }) else { return false }
+        reordered.insert(source, at: index + (placement == .after ? 1 : 0))
+        guard reordered.map(\.id) != sessions.map(\.id) else { return false }
+        sessions = reordered
+        return true
     }
 
     func close(_ session: Session) {

@@ -7,8 +7,12 @@ import SwiftUI
 @Observable
 final class DragState {
     private(set) var sessionID: Session.ID?
-    /// Sidebar'da satırın hangi satırın önüne gireceği.
-    private(set) var beforeRow: Session.ID?
+    struct RowTarget: Equatable {
+        let id: Session.ID
+        let placement: SessionStore.RowPlacement
+    }
+    /// İmlecin bulunduğu satır ve satırın üst/alt yarısı.
+    private(set) var rowTarget: RowTarget?
 
     var isActive: Bool { sessionID != nil }
 
@@ -21,28 +25,43 @@ final class DragState {
     @ObservationIgnored private var local: Any?
     @ObservationIgnored private var global: Any?
     @ObservationIgnored private var watchdog: Timer?
+    @ObservationIgnored private var pendingEnd: DispatchWorkItem?
 
     func begin(_ id: Session.ID) {
         guard sessionID != id else { return }
+        pendingEnd?.cancel()
+        pendingEnd = nil
         sessionID = id
-        beforeRow = nil
+        rowTarget = nil
         startWatching()
         onChange?()
     }
 
-    func hover(before row: Session.ID?) {
-        guard isActive, beforeRow != row else { return }
-        beforeRow = row
+    func hover(row: Session.ID, placement: SessionStore.RowPlacement) {
+        guard isActive else { return }
+        let target = RowTarget(id: row, placement: placement)
+        if rowTarget != target { rowTarget = target }
     }
 
     func leave(row: Session.ID) {
-        if beforeRow == row { beforeRow = nil }
+        if rowTarget?.id == row { rowTarget = nil }
+    }
+
+    // Mouse-up, bırakma temsilcisinden önce gelebilir. Kaynak kimliğini o
+    // sırada silmek geçerli bırakmayı iptal edip kartı eski yerine uçurur.
+    func scheduleEnd() {
+        guard isActive, pendingEnd == nil else { return }
+        let work = DispatchWorkItem { [weak self] in self?.end() }
+        pendingEnd = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     func end() {
         guard sessionID != nil else { return }
         sessionID = nil
-        beforeRow = nil
+        rowTarget = nil
+        pendingEnd?.cancel()
+        pendingEnd = nil
         stopWatching()
         onChange?()
     }
@@ -59,7 +78,7 @@ final class DragState {
     private func startWatching() {
         guard watchdog == nil else { return }
         let finish: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor in self?.end() }
+            Task { @MainActor in self?.scheduleEnd() }
         }
         local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { event in
             finish(); return event
@@ -68,7 +87,7 @@ final class DragState {
         let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard NSEvent.pressedMouseButtons == 0 else { return }
-                self?.end()
+                self?.scheduleEnd()
             }
         }
         watchdog = timer

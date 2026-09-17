@@ -101,8 +101,8 @@ final class AgentRegistry {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return }
 
-        // Şema resmi değil; çözülemezse bu tur sessizce atlanır.
-        guard let records = try? JSONDecoder().decode([AgentRecord].self, from: data) else { return }
+        // Şema resmi değil; çözülemeyen kayıt atlanır, çıktı hiç dizi değilse tur atlanır.
+        guard let records = AgentRecord.list(from: data) else { return }
         DispatchQueue.main.async { [weak self] in self?.onPoll?(records) }
     }
 

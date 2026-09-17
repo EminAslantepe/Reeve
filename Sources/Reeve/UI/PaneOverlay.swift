@@ -63,21 +63,31 @@ private struct ZoneCell: View {
     let title: String
     let symbol: String
     let onDrop: (String) -> Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var targeted = false
+    @State private var appeared = false
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 24, weight: .light))
-            Text(title).font(.system(size: 13, weight: .medium))
-        }
-        .foregroundStyle(targeted ? Theme.ink : Theme.ink2)
+        // Büyük, opak kartlar yerine terminali açık bırakan hafif bir yüzey.
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Color.white.opacity(targeted ? 0.045 : 0.01))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.ink2.opacity(targeted ? 0.28 : 0.08), lineWidth: 1))
+            .overlay(alignment: .bottom) {
+                Label(title, systemImage: symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(targeted ? Theme.ink : Theme.ink2)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Theme.appBG.opacity(targeted ? 0.88 : 0.7), in: Capsule())
+                    .padding(.bottom, 20)
+            }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(targeted ? Theme.selection.opacity(0.96) : Theme.appBG.opacity(0.9))
-                .overlay(RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(targeted ? Theme.busy : Theme.rule,
-                                  lineWidth: targeted ? 2 : 1)))
+        .contentShape(Rectangle())
+        .opacity(appeared ? 1 : 0)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: targeted)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: appeared)
+        .onAppear { appeared = true }
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first else { return false }
             return onDrop(raw)

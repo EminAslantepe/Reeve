@@ -12,6 +12,7 @@ struct SidebarView: View {
     let onResume: (Session) -> Void
     let onStop: (Session) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
     @State private var collapsedFolders: Set<String> = []
     @State private var expandedSessions: Set<UUID> = []
@@ -60,6 +61,7 @@ struct SidebarView: View {
                     if store.sessions.isEmpty { empty }
                     else if visibleGroups.isEmpty && waiting.isEmpty { noMatch }
                 }
+                .animation(reorderAnimation, value: store.sessions.map(\.id))
                 .padding(.bottom, 10)
             }
         }
@@ -80,6 +82,7 @@ struct SidebarView: View {
                     }
                 }
             }
+            .animation(reorderAnimation, value: store.sessions.map(\.id))
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity)
         }
@@ -98,23 +101,17 @@ struct SidebarView: View {
         .padding(.vertical, 5)
         .background(chipBackground(session, selected: selected))
         .contentShape(Rectangle())
-        .opacity(drag.sessionID == session.id ? 0.3 : 1)
-        .overlay(alignment: .top) { insertionLine(above: session) }
+        .opacity(drag.sessionID == session.id ? 0 : 1)
+        .animation(drag.isActive || reduceMotion ? nil : .easeOut(duration: 0.16), value: drag.sessionID)
+        .overlay { dragPlaceholder(for: session) }
         .onTapGesture { store.select(session.id) }
         .onDrag {
             drag.begin(session.id)
             return NSItemProvider(object: session.id.uuidString as NSString)
+        } preview: {
+            SessionDragPreview(session: session)
         }
-        .dropDestination(for: String.self) { items, _ in
-            guard let raw = items.first, let id = UUID(uuidString: raw),
-                  id != session.id, canReorder(id, before: session) else { drag.end(); return false }
-            store.move(id, before: session.id)
-            drag.end()
-            return true
-        } isTargeted: { inside in
-            if inside { drag.hover(before: session.id) }
-            else { drag.leave(row: session.id) }
-        }
+        .modifier(SessionReorderTarget(session: session, store: store, drag: drag))
         .contextMenu { menu(session) }
         .help("\(session.name) · \(session.displayCwd)")
     }
@@ -184,9 +181,8 @@ struct SidebarView: View {
 
     // MARK: - Parçalar
 
-    private func canReorder(_ id: UUID, before target: Session) -> Bool {
-        guard let source = store.session(id) else { return false }
-        return source.cwd == target.cwd && source.status.isWaiting == target.status.isWaiting
+    private var reorderAnimation: Animation? {
+        reduceMotion ? nil : .smooth(duration: 0.22, extraBounce: 0)
     }
 
     private var sidebarHeader: some View {
@@ -247,73 +243,66 @@ struct SidebarView: View {
     @ViewBuilder
     private func row(_ session: Session) -> some View {
         let shown = store.pane(of: session.id) != nil
-        SessionRow(session: session, isSelected: shown, isFocused: store.selectedID == session.id)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            // Sürüklenen satır yerinde soluyor: nereden çıktığı görünür kalıyor.
-            .opacity(drag.sessionID == session.id ? 0.3 : 1)
-            .overlay(alignment: .top) { insertionLine(above: session) }
-            .onTapGesture { store.select(session.id) }
-            .contextMenu { menu(session) }
-            .onDrag {
-                drag.begin(session.id)
-                return NSItemProvider(object: session.id.uuidString as NSString)
-            }
-            .dropDestination(for: String.self) { items, _ in
-                guard let raw = items.first, let id = UUID(uuidString: raw),
-                      id != session.id, canReorder(id, before: session) else { drag.end(); return false }
-                store.move(id, before: session.id)
-                drag.end()
-                return true
-            } isTargeted: { inside in
-                if inside { drag.hover(before: session.id) }
-                else { drag.leave(row: session.id) }
-            }
-
-        // Alt öğeler yalnızca panelde duran oturumda — her satırda göstermek
-        // sidebar'ı gürültüye boğardı (UI.md §2, açık soru 5).
-        if shown && (!session.subagents.isEmpty || !session.children.isEmpty) {
-            Button {
-                if !expandedSessions.insert(session.id).inserted { expandedSessions.remove(session.id) }
-            } label: {
-                Label("Alt ajanlar ve süreçler (\(session.subagents.count + session.children.count))",
-                      systemImage: expandedSessions.contains(session.id) ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.ink2)
-                    .padding(.leading, 30)
-                    .padding(.vertical, 6)
-            }
-            .buttonStyle(.plain)
-        }
-        if shown && expandedSessions.contains(session.id) {
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
-                ForEach(session.subagents) { agent in
-                    SubItemRow(symbol: "gearshape",
-                               label: agent.name,
-                               value: agent.elapsed,
-                               dimmed: agent.finishedAt != nil)
+        VStack(alignment: .leading, spacing: 0) {
+            SessionRow(session: session, isSelected: shown, isFocused: store.selectedID == session.id)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                // Satırın ölçüsü korunur; içerik yalnızca taşınan kartta görünür.
+                .opacity(drag.sessionID == session.id ? 0 : 1)
+                .animation(drag.isActive || reduceMotion ? nil : .easeOut(duration: 0.16), value: drag.sessionID)
+                .overlay { dragPlaceholder(for: session).padding(.horizontal, 6) }
+                .onTapGesture { store.select(session.id) }
+                .contextMenu { menu(session) }
+                .onDrag {
+                    drag.begin(session.id)
+                    return NSItemProvider(object: session.id.uuidString as NSString)
+                } preview: {
+                    SessionDragPreview(session: session)
                 }
+                .modifier(SessionReorderTarget(session: session, store: store, drag: drag))
+
+            // Alt öğeler yalnızca panelde duran oturumda — her satırda göstermek
+            // sidebar'ı gürültüye boğardı (UI.md §2, açık soru 5).
+            if shown && (!session.subagents.isEmpty || !session.children.isEmpty) {
+                Button {
+                    if !expandedSessions.insert(session.id).inserted { expandedSessions.remove(session.id) }
+                } label: {
+                    Label("Alt ajanlar ve süreçler (\(session.subagents.count + session.children.count))",
+                          systemImage: expandedSessions.contains(session.id) ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.ink2)
+                        .padding(.leading, 30)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
             }
-            ForEach(session.children) { child in
-                SubItemRow(symbol: "chevron.right.square",
-                           label: child.name,
-                           value: "pid \(child.id)",
-                           dimmed: false)
+            if shown && expandedSessions.contains(session.id) {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    ForEach(session.subagents) { agent in
+                        SubItemRow(symbol: "gearshape",
+                                   label: agent.name,
+                                   value: agent.elapsed,
+                                   dimmed: agent.finishedAt != nil)
+                    }
+                }
+                ForEach(session.children) { child in
+                    SubItemRow(symbol: "chevron.right.square",
+                               label: child.name,
+                               value: "pid \(child.id)",
+                               dimmed: false)
+                }
             }
         }
     }
 
-    /// Satırın üstünde ince bir çizgi: bırakınca buraya girecek.
     @ViewBuilder
-    private func insertionLine(above session: Session) -> some View {
-        if drag.beforeRow == session.id, let source = drag.sessionID,
-           source != session.id, canReorder(source, before: session) {
-            Capsule()
-                // Mavi fazla bağırıyordu; nötr ve ince.
-                .fill(Theme.ink2)
-                .frame(height: 2)
-                .padding(.horizontal, 8)
-                .offset(y: -1)
+    private func dragPlaceholder(for session: Session) -> some View {
+        if drag.sessionID == session.id {
+            RoundedRectangle(cornerRadius: 7)
+                .strokeBorder(Theme.ink3.opacity(0.22),
+                              style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
     }
 
@@ -464,5 +453,38 @@ private struct GitBadge: View {
                     .foregroundStyle(Theme.ink3)
             }
         }
+    }
+}
+
+/// Kaynak satırın şeffaflığından bağımsız, imleçle taşınan okunaklı kart.
+private struct SessionDragPreview: View {
+    let session: Session
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StatusDot(status: session.status, origin: session.origin)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.name)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
+                Text(session.displayCwd)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.ink2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "rectangle.on.rectangle")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink2)
+        }
+        .padding(12)
+        .frame(width: 264, alignment: .leading)
+        .background(Theme.paletteBG, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(Theme.busy.opacity(0.55), lineWidth: 1))
+        .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
     }
 }
