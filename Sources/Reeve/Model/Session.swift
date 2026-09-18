@@ -84,6 +84,11 @@ final class Session: Identifiable {
     var activity: Activity?
     var subagents: [Subagent] = []
     var children: [ChildProcess] = []
+
+    /// Şu an bu oturumda gerçekten çalışan bir Claude süreci var mı.
+    /// `kind`'dan ayrı: o şablondan geliyor ve hiç değişmiyor — kabukta elle
+    /// `claude` yazınca da, Claude'dan çıkıp kabuğa düşünce de yanılıyordu.
+    var claudeIsLive = false
     /// `Stop` olayındaki son asistan mesajı — "işi bitti" özeti.
     var lastMessage: String?
 

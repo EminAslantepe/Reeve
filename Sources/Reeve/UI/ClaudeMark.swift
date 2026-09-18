@@ -179,7 +179,7 @@ struct SessionLeadingIcon: View {
 
     var body: some View {
         Group {
-            if session.kind == .claude {
+            if session.claudeIsLive {
                 ClaudeMark().fill(Theme.primary)
                     .frame(width: 18, height: 18)
                     .overlay(alignment: .bottomTrailing) {

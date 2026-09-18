@@ -18,6 +18,8 @@ final class SessionStore {
 
     private(set) var sessions: [Session] = []
     private(set) var gitStates: [String: GitState] = [:]
+    /// Katman 1'in gördüğü canlı Claude süreçlerinin pid'leri.
+    @ObservationIgnored private var liveClaudePIDs: Set<pid_t> = []
 
     /// Hangi oturum hangi panelde. Tek `selectedID` yetmiyor: ⌥⏎ ile oturum
     /// değiştirmeden ikinci panele gönderiliyor (UI.md D11).
@@ -120,6 +122,9 @@ final class SessionStore {
         for record in records {
             if let uuid = record.sessionUUID { byID[uuid] = record }
         }
+        // Canlı etkileşimli Claude süreçleri. Süreç adına bakmıyoruz: npm
+        // kurulumunda `claude` bir node betikidir ve `proc_name` "node" der.
+        liveClaudePIDs = Set(records.filter { !$0.isBackground }.compactMap(\.pid))
 
         var transitions: [Transition] = []
         var vanished: [Session] = []
@@ -146,6 +151,8 @@ final class SessionStore {
         }
 
         for session in vanished { remove(session) }
+
+        refreshClaudePresence()
 
         // Reeve'in açmadıkları sidebar'a **girmiyor**: ne başka terminalde elle
         // açılmış oturumlar ne de arka plan ajanları. Yoklamanın buradaki tek işi
@@ -184,6 +191,25 @@ final class SessionStore {
             guard let pid = session.pid else { continue }
             let found = trees[pid] ?? []
             if session.children != found { session.children = found }
+        }
+        // Süreç ağacı değişti: `claude` başlamış ya da bitmiş olabilir.
+        refreshClaudePresence()
+    }
+
+    /// Simge şablona değil gerçeğe baksın: Katman 1'in bildirdiği canlı Claude
+    /// pid'leriyle oturumun süreç ağacını kesiştiriyoruz. Kabukta elle açılan
+    /// Claude de yakalanıyor, çıkılan Claude de düşüyor.
+    private func refreshClaudePresence() {
+        for session in sessions {
+            var live = false
+            if let pid = session.pid, liveClaudePIDs.contains(pid) { live = true }
+            if !live {
+                live = session.children.contains { liveClaudePIDs.contains($0.id) }
+            }
+            // PTY'si bizde olmayan oturumun ağacını göremiyoruz; orada şablon
+            // bilgisi elimizdeki tek şey.
+            if !live, session.origin != .center, session.kind == .claude { live = true }
+            if session.claudeIsLive != live { session.claudeIsLive = live }
         }
     }
 

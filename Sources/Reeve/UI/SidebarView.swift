@@ -560,7 +560,7 @@ private struct SessionChip: View {
             .overlay(RoundedRectangle(cornerRadius: 9)
                 .strokeBorder(focused ? Theme.primary.opacity(0.55) : isHovered ? Theme.primary.opacity(0.35) : Theme.ruleSoft, lineWidth: 1))
             .overlay(alignment: .topLeading) {
-                if session.kind == .claude {
+                if session.claudeIsLive {
                     ClaudeMark().fill(Theme.primary)
                         .frame(width: 9, height: 9)
                         .padding(4)
