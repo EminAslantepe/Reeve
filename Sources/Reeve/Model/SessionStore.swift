@@ -186,6 +186,21 @@ final class SessionStore {
             .map { ($0.id, $0.claudeSessionID, $0.cwd) }
     }
 
+    func applyCwds(_ cwds: [pid_t: String]) {
+        for session in sessions {
+            guard let pid = session.pid, let path = cwds[pid] else { continue }
+            if session.liveCwd != path { session.liveCwd = path }
+        }
+    }
+
+    /// Terminale `cd` yazdırıyoruz — kabuğun dizinini dışarıdan değiştirmenin
+    /// başka yolu yok. Yol tek tırnak içinde: boşluk ve özel karakterler
+    /// kabuk tarafından yorumlanmasın.
+    func changeDirectory(_ session: Session, to path: String) {
+        let quoted = "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        session.pty.write(Data("cd \(quoted)\n".utf8))
+    }
+
     func applyChildren(_ trees: [pid_t: [ChildProcess]]) {
         for session in sessions {
             guard let pid = session.pid else { continue }

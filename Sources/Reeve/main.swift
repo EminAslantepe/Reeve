@@ -133,6 +133,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         processTree.onUpdate = { [weak self] trees in
             self?.store.applyChildren(trees)
         }
+        processTree.onCwd = { [weak self] cwds in
+            self?.store.applyCwds(cwds)
+        }
         // Katman 3 - model, token, maliyet ve konusma adimlari.
         transcript.onUpdate = { [weak self] usages in
             self?.store.applyUsage(usages)
@@ -682,7 +685,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         root.view.layer?.backgroundColor = Theme.nsAppBG.cgColor
         root.addChild(split)
 
-        let statusBar = NSHostingView(rootView: StatusBarView(store: store))
+        let statusBar = StatusBarHostingView(store: store)
         for sub in [split.view, statusBar] {
             sub.translatesAutoresizingMaskIntoConstraints = false
             root.view.addSubview(sub)

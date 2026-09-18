@@ -85,6 +85,14 @@ final class Session: Identifiable {
     var subagents: [Subagent] = []
     var children: [ChildProcess] = []
 
+    /// Kabuğun şu anki çalışma dizini (`cd` ile değişir). `cwd` açılış
+    /// dizini olarak duruyor: gruplama ona bakıyor, yoksa `cd` yaptıkça
+    /// satırlar gruplar arasında zıplayacaktı.
+    var liveCwd: String?
+
+    /// Gösterilecek dizin: canlısı varsa o, yoksa açılış dizini.
+    var currentCwd: String { liveCwd ?? cwd }
+
     /// Şu an bu oturumda gerçekten çalışan bir Claude süreci var mı.
     /// `kind`'dan ayrı: o şablondan geliyor ve hiç değişmiyor — kabukta elle
     /// `claude` yazınca da, Claude'dan çıkıp kabuğa düşünce de yanılıyordu.
@@ -139,9 +147,13 @@ final class Session: Identifiable {
         return reportedPID
     }
 
-    var displayCwd: String {
+    var displayCwd: String { Session.tilde(currentCwd) }
+
+    /// Ev dizini `~` olarak kısaltılıyor.
+    static func tilde(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return cwd.hasPrefix(home) ? "~" + cwd.dropFirst(home.count) : cwd
+        if path == home { return "~" }
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 
     var folderName: String { (cwd as NSString).lastPathComponent }

@@ -28,6 +28,7 @@ struct PaneHeaderBar: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(focused ? Theme.ink : Theme.ink2)
                     .lineLimit(1)
+                DirectoryMenu(session: session, store: store)
                 Spacer(minLength: 6)
                 Text(trailing(session))
                     .font(.system(size: 12, design: .monospaced))
@@ -78,5 +79,78 @@ private struct CloseButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Paneli kapat")
+    }
+}
+
+/// Panelin sol üstündeki dizin göstergesi ve gezgini.
+///
+/// Gösterdiği şey kabuğun **gerçek** çalışma dizini (çekirdekten okunuyor),
+/// açılış dizini değil. Menüden bir klasör seçilince terminale `cd` yazılıyor —
+/// kabuğun dizinini dışarıdan değiştirmenin başka yolu yok.
+///
+/// Claude çalışırken menü sönük ve tıklanamıyor: PTY'yi Claude okuyor, yani
+/// yazdığımız `cd` kabuğa değil onun girdi kutusuna düşerdi. Yol gösterilmeye
+/// devam ediyor — kabuğun dizini değişmiyor, sadece oraya yazı gönderemiyoruz.
+private struct DirectoryMenu: View {
+    let session: Session
+    let store: SessionStore
+
+    var body: some View {
+        Menu {
+            let current = session.currentCwd
+            let parent = (current as NSString).deletingLastPathComponent
+            if !parent.isEmpty, parent != current {
+                Button("↑ Üst dizin — \(Session.tilde(parent))") {
+                    store.changeDirectory(session, to: parent)
+                }
+                Divider()
+            }
+            let folders = subdirectories(of: current)
+            if folders.isEmpty {
+                Text("alt klasör yok")
+            } else {
+                ForEach(folders, id: \.self) { name in
+                    Button(name) {
+                        store.changeDirectory(session, to: (current as NSString)
+                            .appendingPathComponent(name))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "folder")
+                    .font(.system(size: 10))
+                Text(Session.tilde(session.currentCwd))
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            .foregroundStyle(Theme.ink3)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(session.claudeIsLive)
+        .opacity(session.claudeIsLive ? 0.45 : 1)
+        .help(session.claudeIsLive
+              ? "Claude çalışırken dizin değiştirilemiyor — \(session.currentCwd)"
+              : session.currentCwd)
+    }
+
+    /// Menü açıldığında okunuyor. Gizli klasörler dışarıda: `cd` menüsünde
+    /// `.git` ve `.build` gürültüden başka bir şey değil.
+    private func subdirectories(of path: String) -> [String] {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: path) else { return [] }
+        var found: [String] = []
+        for name in names where !name.hasPrefix(".") {
+            var isDir: ObjCBool = false
+            let full = (path as NSString).appendingPathComponent(name)
+            if fm.fileExists(atPath: full, isDirectory: &isDir), isDir.boolValue {
+                found.append(name)
+            }
+        }
+        return found.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .prefix(200).map { $0 }
     }
 }

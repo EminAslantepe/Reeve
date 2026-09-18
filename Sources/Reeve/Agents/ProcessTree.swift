@@ -25,8 +25,13 @@ final class ProcessTree {
     /// Ana kuyrukta: PTY kök pid'i → altındaki süreçler.
     var onUpdate: (([pid_t: [ChildProcess]]) -> Void)?
 
+    /// Ana kuyrukta: PTY kök pid'i → kabuğun **gerçek** çalışma dizini.
+    /// Açılış dizini değil: kullanıcı `cd` yaptıkça bu değişiyor.
+    var onCwd: (([pid_t: String]) -> Void)?
+
     private let queue = DispatchQueue(label: "io.reeve.proctree")
     private var last: [pid_t: [ChildProcess]] = [:]
+    private var lastCwds: [pid_t: String] = [:]
 
     /// Gösterilmesi anlamsız ara katmanlar — kullanıcı `npm run dev` görmek istiyor,
     /// onu taşıyan kabuğu değil.
@@ -46,9 +51,35 @@ final class ProcessTree {
                 Self.walk(root, in: byParent, depth: 0, into: &found)
                 if !found.isEmpty { result[root] = found }
             }
-            guard result != self.last else { return }
+            var cwds: [pid_t: String] = [:]
+            for root in roots {
+                if let path = Self.workingDirectory(of: root) { cwds[root] = path }
+            }
+            let treesChanged = result != self.last
+            let cwdsChanged = cwds != self.lastCwds
+            guard treesChanged || cwdsChanged else { return }
             self.last = result
-            DispatchQueue.main.async { self.onUpdate?(result) }
+            self.lastCwds = cwds
+            DispatchQueue.main.async {
+                if treesChanged { self.onUpdate?(result) }
+                if cwdsChanged { self.onCwd?(cwds) }
+            }
+        }
+    }
+
+    /// Bir sürecin çalışma dizini. `PROC_PIDVNODEPATHINFO` çekirdekten
+    /// doğrudan okuyor — kabuğa soru sormuyoruz, kabuk yapılandırmasına
+    /// (prompt komutu, OSC 7 dizisi) hiç bağlı değiliz.
+    static func workingDirectory(of pid: pid_t) -> String? {
+        var info = proc_vnodepathinfo()
+        let size = MemoryLayout<proc_vnodepathinfo>.size
+        let read = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, Int32(size))
+        guard read == Int32(size) else { return nil }
+        var path = info.pvi_cdir.vip_path
+        return withUnsafeBytes(of: &path) { raw in
+            guard let base = raw.baseAddress else { return nil }
+            let text = String(cString: base.assumingMemoryBound(to: CChar.self))
+            return text.isEmpty ? nil : text
         }
     }
 

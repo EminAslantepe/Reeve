@@ -3,6 +3,7 @@ import SwiftUI
 /// Seçili oturumun kullanımı her genişlikte okunabilir kalır.
 struct StatusBarView: View {
     let store: SessionStore
+    var availableWidth: CGFloat?
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -23,6 +24,8 @@ struct StatusBarView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(width: availableWidth)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Theme.statusbar)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.rule).frame(height: 1)
@@ -73,5 +76,31 @@ struct StatusBarView: View {
              ? "\(store.paneCount) panel · \(store.sessions.count) oturum"
              : "\(store.sessions.count) oturum")
             .fixedSize()
+    }
+}
+
+/// AppKit'e yalnızca geçerli genişlikteki düzenin doğal yüksekliğini bildirir.
+final class StatusBarHostingView: NSHostingView<StatusBarView> {
+    convenience init(store: SessionStore) {
+        self.init(rootView: StatusBarView(store: store))
+    }
+
+    required init(rootView: StatusBarView) {
+        super.init(rootView: rootView)
+        // ViewThatFits'in dar ve geniş düzenleri çelişen min/max yükseklikler
+        // üretebilir. Sadece mevcut genişlikteki doğal yüksekliği uygula.
+        sizingOptions = [.intrinsicContentSize]
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        guard newSize.width > 0, rootView.availableWidth != newSize.width else { return }
+        rootView.availableWidth = newSize.width
+        invalidateIntrinsicContentSize()
     }
 }
