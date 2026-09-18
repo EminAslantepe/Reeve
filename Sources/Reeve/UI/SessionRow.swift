@@ -12,6 +12,14 @@ struct SessionRow: View {
     let isSelected: Bool
     var isFocused = false
     var isHovered = false
+    /// Açıkken adın yerinde bir metin alanı beliriyor — ayrı bir sayfa açılmıyor.
+    var isEditing = false
+    var onCommitName: ((String) -> Void)?
+    var onCancelEdit: (() -> Void)?
+
+    @State private var draft = ""
+    @State private var cancelled = false
+    @FocusState private var editorFocused: Bool
 
     private var isAlarm: Bool {
         if case .waiting = session.status { return true }
@@ -26,10 +34,34 @@ struct SessionRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    Text(session.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.ink)
-                        .lineLimit(1)
+                    if isEditing {
+                        TextField("", text: $draft)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.ink)
+                            .focused($editorFocused)
+                            .onAppear {
+                                draft = session.name
+                                cancelled = false
+                                editorFocused = true
+                            }
+                            .onSubmit { editorFocused = false }
+                            .onExitCommand {
+                                cancelled = true
+                                editorFocused = false
+                            }
+                            // Odak kaybı tek çıkış kapısı: Enter da Esc de önce odayı
+                            // bırakıyor, böylece iki kez işlenmiyor.
+                            .onChange(of: editorFocused) { _, focused in
+                                guard !focused else { return }
+                                if cancelled { onCancelEdit?() } else { onCommitName?(draft) }
+                            }
+                    } else {
+                        Text(session.name)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.ink)
+                            .lineLimit(1)
+                    }
                     if session.hasUnseenOutput {
                         Circle()
                             .fill(Theme.busy)

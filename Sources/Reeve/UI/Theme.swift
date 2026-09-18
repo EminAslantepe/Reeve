@@ -27,6 +27,10 @@ enum Theme {
     static let agent  = Color(hex: 0xC8A584)      // --st-bg
     static let error  = Color(hex: 0xEF6A5E)      // --st-err
 
+    // Fark görünümü — terminal paletindeki yeşil ve kırmızıyla aynı.
+    static let diffAdd = Color(hex: 0x6FCF97)
+    static let diffDel = Color(hex: 0xEF6A5E)
+
     // Sheet / kontroller
     static let sheetBG   = Color(hex: 0x1D1D1D)
     static let control   = Color(hex: 0x161616)

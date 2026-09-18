@@ -62,6 +62,23 @@ final class GitProbe {
 
     // MARK: - İnceleme paneli için, istek üzerine
 
+    /// Ham birleşik fark. Görüntüleyici açıkken istek üzerine; çıktı devasa
+    /// olabildiği için tavanla kesiliyor (panel zaten o kadarını göstermiyor).
+    func diff(in cwd: String, path: String? = nil, limit: Int = 400_000,
+              completion: @escaping (String) -> Void) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            var args = ["diff", "HEAD"]
+            // `--` ayracı şart: yol bir dal adıyla çakışırsa git yolu değil dalı seçerdi.
+            if let path { args += ["--", path] }
+            var raw = self.run(args, in: cwd) ?? ""
+            if raw.count > limit {
+                raw = String(raw.prefix(limit)) + "\n\n… fark çıktısı kısaltıldı"
+            }
+            DispatchQueue.main.async { completion(raw) }
+        }
+    }
+
     /// `git diff --stat` — panel açıkken çağrılıyor. Büyük repolarda pahalı
     /// olabildiği için düzenli yoklamaya sokulmadı.
     func changes(in cwd: String, completion: @escaping ([GitChange]) -> Void) {

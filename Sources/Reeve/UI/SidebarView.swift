@@ -13,7 +13,10 @@ struct SidebarView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoveredSessionID: Session.ID?
-    @State private var renamingSession: Session?
+    /// Adı yerinde düzenlenen oturum. Ayrı bir sayfa yok; satırın kendisi değişiyor.
+    @State private var editingSessionID: Session.ID?
+    /// Kapatma onayı bekleyen oturum.
+    @State private var closingSession: Session?
     @State private var query = ""
     @State private var collapsedFolders: Set<String> = []
     @State private var expandedSessions: Set<UUID> = []
@@ -33,11 +36,17 @@ struct SidebarView: View {
         }
         .background(Theme.sidebar)
         .tint(Theme.primary)
-        .sheet(item: $renamingSession) { session in
-            RenameSessionSheet(name: session.name, onCancel: { renamingSession = nil }) { name in
-                store.rename(session, to: name)
-                renamingSession = nil
+        .alert("Oturumu kapat?",
+               isPresented: Binding(get: { closingSession != nil },
+                                    set: { if !$0 { closingSession = nil } }),
+               presenting: closingSession) { session in
+            Button("Kapat", role: .destructive) {
+                if session.hasTerminal { store.close(session) } else { store.remove(session) }
+                closingSession = nil
             }
+            Button("Vazgeç", role: .cancel) { closingSession = nil }
+        } message: { session in
+            Text(Self.closeWarning(for: session))
         }
     }
 
@@ -260,7 +269,13 @@ struct SidebarView: View {
         let hovered = hoveredSessionID == session.id && !drag.isActive
         VStack(alignment: .leading, spacing: 0) {
             SessionRow(session: session, isSelected: shown,
-                       isFocused: store.selectedID == session.id, isHovered: hovered)
+                       isFocused: store.selectedID == session.id, isHovered: hovered,
+                       isEditing: editingSessionID == session.id,
+                       onCommitName: { name in
+                           store.rename(session, to: name)
+                           editingSessionID = nil
+                       },
+                       onCancelEdit: { editingSessionID = nil })
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
                 // Satırın ölçüsü korunur; içerik yalnızca taşınan kartta görünür.
@@ -320,6 +335,33 @@ struct SidebarView: View {
         }
     }
 
+    /// Kapatmanın ne yaptığını açıkça yazıyoruz: SIGHUP, SIGKILL değil. Çalışan
+    /// bir şey varsa önce onu söylüyoruz — asıl kaybı göze aldıran o.
+    static func closeWarning(for session: Session) -> String {
+        var parts: [String] = []
+
+        let running: String?
+        switch session.status {
+        case .busy:    running = "Claude şu an çalışıyor"
+        case .waiting: running = "Bu oturum senden izin bekliyor"
+        default:       running = nil
+        }
+        if let running {
+            parts.append("\(running). Kapatırsan yarıda kesilecek.")
+        } else if !session.children.isEmpty {
+            let names = session.children.prefix(3).map(\.name).joined(separator: ", ")
+            let extra = session.children.count > 3 ? " ve \(session.children.count - 3) tane daha" : ""
+            parts.append("Bu oturumda çalışan süreç var: \(names)\(extra).")
+        }
+
+        if session.hasTerminal {
+            parts.append("Terminale SIGHUP gönderilecek ve oturum listeden kalkacak.")
+        } else {
+            parts.append("Oturum listeden kaldırılacak.")
+        }
+        return parts.joined(separator: " ")
+    }
+
     private func setHover(_ inside: Bool, for session: Session) {
         if inside { hoveredSessionID = session.id }
         else if hoveredSessionID == session.id { hoveredSessionID = nil }
@@ -327,11 +369,8 @@ struct SidebarView: View {
 
     private func rowActions(_ session: Session, compact: Bool) -> some View {
         SessionActionBar(session: session, compact: compact,
-                         onRename: { renamingSession = session },
-                         onClose: {
-                             if session.hasTerminal { store.close(session) }
-                             else { store.remove(session) }
-                         })
+                         onRename: { editingSessionID = session.id },
+                         onClose: { closingSession = session })
     }
 
     @ViewBuilder
@@ -368,7 +407,7 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func menu(_ session: Session) -> some View {
-        Button("Yeniden adlandır…") { renamingSession = session }
+        Button("Yeniden adlandır") { editingSessionID = session.id }
         Divider()
         Button("Odaklan") { store.select(session.id) }
         Button("İkinci panelde aç") { store.sendToSecondPane(session.id) }
@@ -551,7 +590,9 @@ private struct SessionActionBar: View {
 
     var body: some View {
         HStack(spacing: 1) {
-            Button(action: onRename) {
+            Menu {
+                Button("Yeniden adlandır", action: onRename)
+            } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: compact ? 10 : 11, weight: .bold))
                     .foregroundStyle(hoveredAction == .menu ? Theme.ink : Theme.primary)
@@ -559,10 +600,12 @@ private struct SessionActionBar: View {
                     .background(hoveredAction == .menu ? Theme.primary.opacity(0.22) : .clear,
                                 in: RoundedRectangle(cornerRadius: 4))
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .onHover { hoveredAction = $0 ? .menu : nil }
-            .help("Oturumu yeniden adlandır")
-            .accessibilityLabel("Oturumu yeniden adlandır")
+            .help("Oturum seçenekleri")
+            .accessibilityLabel("Oturum seçenekleri")
 
             Button(action: onClose) {
                 Image(systemName: "xmark")

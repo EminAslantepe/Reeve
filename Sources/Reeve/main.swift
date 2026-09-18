@@ -26,6 +26,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     private var sidebarItem: NSSplitViewItem!
     private var sidebarSplitView: SidebarSplitView!
     private var expandedSidebarWidth = Theme.sidebarWidth
+    private var filesItem: NSSplitViewItem!
+    private var viewerItem: NSSplitViewItem!
+    private let viewer = ViewerModel()
+
+    /// Sağ üstteki `+N −M`. Yoklamada tazeleniyor ama her turda değil:
+    /// `git diff --numstat` büyük repoda pahalı.
+    private var gitSummary: (added: Int, removed: Int)?
+    private var gitSummaryCwd: String?
+    private var gitSummaryAt = Date.distantPast
+    private weak var gitButton: NSButton?
+    private weak var gitChip: NSView?
     private var inspectorItem: NSSplitViewItem!
 
     private var tier = SidebarTier.stored
@@ -108,6 +119,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
             self.store.apply(records)
             self.notifier.updateBadge(waiting: self.store.waiting.count)
             self.gitProbe.refresh(cwds: self.store.uniqueCwds)
+            self.refreshGitSummary()
             self.processTree.refresh(roots: self.store.sessions.compactMap(\.pid))
             self.transcript.refresh(self.store.transcriptTargets)
             self.refreshContent()
@@ -218,6 +230,57 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     }
 
     // MARK: - İnceleme paneli
+
+    @objc func showGitDiff(_ sender: Any?) {
+        guard let cwd = store.selected?.cwd else { return }
+        viewer.showChanges(cwd: cwd, probe: gitProbe)
+    }
+
+    /// Yoklamaya takılı ama kısılmış: cwd değiştiyse hemen, değişmediyse
+    /// en fazla dört saniyede bir.
+    private func refreshGitSummary() {
+        guard let cwd = store.selected?.cwd else {
+            gitSummary = nil
+            gitSummaryCwd = nil
+            applyGitSummary()
+            return
+        }
+        let stale = Date().timeIntervalSince(gitSummaryAt) > 4
+        guard cwd != gitSummaryCwd || stale else { return }
+        gitSummaryCwd = cwd
+        gitSummaryAt = Date()
+        gitProbe.changes(in: cwd) { [weak self] changes in
+            guard let self, self.gitSummaryCwd == cwd else { return }
+            let added = changes.reduce(0) { $0 + $1.added }
+            let removed = changes.reduce(0) { $0 + $1.removed }
+            self.gitSummary = (added == 0 && removed == 0) ? nil : (added, removed)
+            self.applyGitSummary()
+        }
+    }
+
+    private func applyGitSummary() {
+        guard let gitButton else { return }
+        guard let summary = gitSummary else {
+            gitButton.attributedTitle = NSAttributedString(string: "")
+            gitChip?.isHidden = true
+            return
+        }
+        gitChip?.isHidden = false
+        let text = NSMutableAttributedString()
+        text.append(NSAttributedString(string: "+\(summary.added)",
+                                       attributes: [.foregroundColor: NSColor(Theme.diffAdd)]))
+        text.append(NSAttributedString(string: "  −\(summary.removed)",
+                                       attributes: [.foregroundColor: NSColor(Theme.diffDel)]))
+        gitButton.attributedTitle = text
+    }
+
+    @objc func toggleFiles(_ sender: Any?) {
+        guard let filesItem else { return }
+        filesItem.isCollapsed.toggle()
+        UserDefaults.standard.set(!filesItem.isCollapsed, forKey: Self.filesVisibleKey)
+        // Menüden ya da kestirmeden gelindiğinde düğme kendi durumunu bilmiyor.
+        filesButton?.state = filesItem.isCollapsed ? .off : .on
+    }
 
     @objc func toggleInspector(_ sender: Any?) {
         inspector.isVisible.toggle()
@@ -579,9 +642,38 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         split.splitView = sidebarSplit
         sidebarSplitView = sidebarSplit
         split.addSplitViewItem(sidebar)
+
+        // Dosya paneli sidebar'ın hemen sağında; varsayılan kapalı, tercih kalıcı.
+        let filesVC = NSHostingController(rootView: FileTreeView(
+            store: store,
+            onOpenFile: { [weak self] url in self?.viewer.show(file: url) }))
+        let files = NSSplitViewItem(viewController: filesVC)
+        files.minimumThickness = 180
+        files.maximumThickness = 420
+        files.canCollapse = true
+        files.holdingPriority = .init(259)
+        files.isCollapsed = !UserDefaults.standard.bool(forKey: Self.filesVisibleKey)
+        filesItem = files
+        split.addSplitViewItem(files)
+
         let terminalItem = NSSplitViewItem(viewController: content)
         terminalItem.minimumThickness = 360
         split.addSplitViewItem(terminalItem)
+
+        // Görüntüleyici terminalin sağında, inceleme panelinin solunda. İstek
+        // üzerine açılıyor: dosya tıklandığında ya da git özetine basıldığında.
+        let viewerVC = NSHostingController(rootView: ViewerPanel(model: viewer))
+        let viewerSide = NSSplitViewItem(viewController: viewerVC)
+        viewerSide.minimumThickness = 280
+        viewerSide.maximumThickness = 680
+        viewerSide.canCollapse = true
+        viewerSide.isCollapsed = true
+        viewerItem = viewerSide
+        viewer.onVisibilityChange = { [weak self] visible in
+            self?.viewerItem?.isCollapsed = !visible
+        }
+        split.addSplitViewItem(viewerSide)
+
         split.addSplitViewItem(inspectorSide)
 
         let root = NSViewController()
@@ -637,7 +729,48 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
 
     // MARK: - Araç çubuğu
 
+    private static let filesVisibleKey = "FilesPanelVisible"
+
+    /// Araç çubuğu simgeleri aynı görsel ağırlıkta dursun: yapılandırma verilmezse
+    /// her glif kendi doğal boyutunda çiziliyor ve yoğun olanlar iri görünüyor.
+    private static let toolbarSymbol = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+
+    /// Açık/kapalı durumunu gösteren düğme; durumu menüden de değişebildiği için
+    /// referansı tutuyoruz.
+    private weak var filesButton: NSButton?
+
+    /// Düz `NSToolbarItem.image` ne hover ne de basılı durum çiziyor. Gerçek bir
+    /// `NSButton` ikisini de bedavaya veriyor: `pushOnPushOff` açıkken kabarık
+    /// zemin bırakıyor, kenarlık imleç üzerine gelince beliriyor.
+    private func toolbarButton(_ image: NSImage?, toggle: Bool, action: Selector) -> NSButton {
+        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        button.setButtonType(toggle ? .pushOnPushOff : .momentaryPushIn)
+        button.bezelStyle = .texturedRounded
+        button.isBordered = true
+        button.imagePosition = .imageOnly
+        // Şablon simge varsayılanda ikincil etiket renginde çiziliyor; bir tik açıyoruz.
+        button.contentTintColor = NSColor(Theme.ink2)
+        button.frame = NSRect(x: 0, y: 0, width: 30, height: 22)
+        return button
+    }
+
+    /// İlk çözülen ad kullanılıyor: SF Symbols adları sürümle değişiyor, biri
+    /// yoksa düğme simgesiz kalmasın.
+    private static func toolbarImage(_ names: [String]) -> NSImage? {
+        for name in names {
+            if let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) {
+                return image.withSymbolConfiguration(toolbarSymbol)
+            }
+        }
+        return nil
+    }
+
     private static let sidebarItemID = NSToolbarItem.Identifier("sidebarTier")
+
+    private static let filesItemID = NSToolbarItem.Identifier("filesPanel")
+
+
+    private static let gitItemID = NSToolbarItem.Identifier("gitSummary")
 
     private static let titleItemID = NSToolbarItem.Identifier("windowTitle")
 
@@ -647,7 +780,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     /// Pencere başlığı gizlenip araç çubuğuna taşındı; aksi halde macOS başlığı
     /// sola koyup bütün araç çubuğu öğelerini sağa itiyor.
     private var toolbarLayout: [NSToolbarItem.Identifier] {
-        [Self.sidebarItemID, Self.titleItemID, .flexibleSpace]
+        [Self.sidebarItemID, Self.filesItemID, Self.titleItemID, .flexibleSpace, Self.gitItemID]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -664,11 +797,50 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: identifier)
         switch identifier {
         case Self.sidebarItemID:
-            item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)
+            let button = toolbarButton(Self.toolbarImage(["sidebar.left"]),
+                                       toggle: false, action: #selector(cycleSidebar(_:)))
+            button.toolTip = "Sidebar'ı daralt / genişlet (⌘S)"
+            item.view = button
             item.label = "Sidebar"
-            item.toolTip = "Sidebar'ı daralt / genişlet (⌘S)"
-            item.target = self
-            item.action = #selector(cycleSidebar(_:))
+
+        case Self.filesItemID:
+            let button = toolbarButton(Self.toolbarImage(["wrench.adjustable", "wrench"]),
+                                       toggle: true, action: #selector(toggleFiles(_:)))
+            button.toolTip = "Dosya panelini aç / kapat (⌘⌥E)"
+            button.state = (filesItem?.isCollapsed == false) ? .on : .off
+            filesButton = button
+            item.view = button
+            item.label = "Dosyalar"
+
+        case Self.gitItemID:
+            let button = NSButton(title: "", target: self, action: #selector(showGitDiff(_:)))
+            button.isBordered = false
+            button.image = Self.toolbarImage(["plusminus"])
+            button.imagePosition = .imageLeading
+            button.contentTintColor = NSColor(Theme.ink2)
+            button.font = .monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
+            button.toolTip = "Çalışma ağacındaki değişiklikler — tıkla, dosyaları sağda aç"
+            gitButton = button
+
+            // Koyu yuvarlak çip. Düğmenin kendi zemini yok (`isBordered = false`),
+            // yoksa sistem bezeli çipin rengini bastırırdı.
+            let chip = NSView()
+            chip.wantsLayer = true
+            chip.layer?.backgroundColor = NSColor(Theme.control).cgColor
+            chip.layer?.cornerRadius = 6
+            chip.translatesAutoresizingMaskIntoConstraints = false
+            button.translatesAutoresizingMaskIntoConstraints = false
+            chip.addSubview(button)
+            NSLayoutConstraint.activate([
+                button.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 8),
+                button.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -8),
+                button.topAnchor.constraint(equalTo: chip.topAnchor, constant: 3),
+                button.bottomAnchor.constraint(equalTo: chip.bottomAnchor, constant: -3),
+            ])
+            item.view = chip
+            gitChip = chip
+            item.label = "Değişiklikler"
+            applyGitSummary()
 
         case Self.titleItemID:
             let label = NSTextField(labelWithString: "Reeve")
@@ -735,6 +907,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         let split = NSMenuItem(title: "Paneli böl / birleştir",
                                action: #selector(togglePanes(_:)), keyEquivalent: "d")
         viewMenu.addItem(split)
+        let filesMenuItem = NSMenuItem(title: "Dosya paneli",
+                                       action: #selector(toggleFiles(_:)), keyEquivalent: "e")
+        filesMenuItem.keyEquivalentModifierMask = [.command, .option]
+        viewMenu.addItem(filesMenuItem)
         let inspect = NSMenuItem(title: "İnceleme paneli",
                                  action: #selector(toggleInspector(_:)), keyEquivalent: "i")
         inspect.keyEquivalentModifierMask = [.command, .option]
