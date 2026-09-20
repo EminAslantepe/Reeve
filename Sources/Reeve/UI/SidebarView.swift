@@ -224,9 +224,9 @@ struct SidebarView: View {
         Button(action: onNew) {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.primary)
+                .foregroundStyle(Theme.ink2)
                 .frame(width: compact ? 36 : 28, height: compact ? 36 : 28)
-                .background(Theme.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                .background(Theme.choiceOn, in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .help("Yeni oturum (⌘N)")
@@ -257,7 +257,7 @@ struct SidebarView: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Theme.searchBG)
                 .overlay(RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Theme.ruleSoft, lineWidth: 1)))
+                    .strokeBorder(Theme.ruleSoft, lineWidth: Theme.hairline)))
         .padding(.horizontal, 10)
         .padding(.top, 8)
         .padding(.bottom, 10)
@@ -533,7 +533,7 @@ private struct SessionDragPreview: View {
         .frame(width: 220, alignment: .leading)
         .background(Theme.paletteBG, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(Theme.busy.opacity(0.55), lineWidth: 1))
+            .strokeBorder(Theme.busy.opacity(0.55), lineWidth: Theme.hairline))
         .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
     }
 }
@@ -551,14 +551,14 @@ private struct SessionChip: View {
             .font(.system(size: 12, weight: .semibold, design: .monospaced))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
-            .foregroundStyle(focused ? Theme.primary : Theme.ink)
+            .foregroundStyle(focused ? Theme.ink : Theme.ink2)
             .offset(y: 4)
             .padding(.horizontal, 4)
             .frame(width: 44, height: 44)
             .background(selected ? Theme.selection : isHovered ? Theme.choiceOn : Theme.control,
                         in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(focused ? Theme.primary.opacity(0.55) : isHovered ? Theme.primary.opacity(0.35) : Theme.ruleSoft, lineWidth: 1))
+                .strokeBorder(focused ? Theme.focusRule : isHovered ? Theme.rule : Theme.ruleSoft, lineWidth: Theme.hairline))
             .overlay(alignment: .topLeading) {
                 if session.claudeIsLive {
                     ClaudeMark().fill(Theme.primary)
@@ -595,13 +595,14 @@ private struct SessionActionBar: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: compact ? 10 : 11, weight: .bold))
-                    .foregroundStyle(hoveredAction == .menu ? Theme.ink : Theme.primary)
+                    .foregroundStyle(hoveredAction == .menu ? Theme.ink : Theme.ink2)
                     .frame(width: compact ? 21 : 25, height: compact ? 21 : 25)
-                    .background(hoveredAction == .menu ? Theme.primary.opacity(0.22) : .clear,
+                    .background(hoveredAction == .menu ? Theme.choiceOn : .clear,
                                 in: RoundedRectangle(cornerRadius: 4))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
+            .tint(Theme.ink2)
             .fixedSize()
             .onHover { hoveredAction = $0 ? .menu : nil }
             .help("Oturum seçenekleri")
@@ -610,7 +611,7 @@ private struct SessionActionBar: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: compact ? 9 : 10, weight: .bold))
-                    .foregroundStyle(hoveredAction == .close ? Theme.ink : Theme.error)
+                    .foregroundStyle(hoveredAction == .close ? Theme.error : Theme.ink2)
                     .frame(width: compact ? 21 : 25, height: compact ? 21 : 25)
                     .background(hoveredAction == .close ? Theme.error.opacity(0.22) : .clear,
                                 in: RoundedRectangle(cornerRadius: 4))
@@ -624,7 +625,7 @@ private struct SessionActionBar: View {
         .foregroundStyle(Theme.ink2)
         .background(Theme.control, in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6)
-            .strokeBorder(Theme.ruleSoft.opacity(hoveredAction == nil ? 0.9 : 1), lineWidth: 1))
+            .strokeBorder(Theme.ruleSoft.opacity(hoveredAction == nil ? 0.9 : 1), lineWidth: Theme.hairline))
         .fixedSize(horizontal: true, vertical: true)
         .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
         .animation(.easeOut(duration: 0.1), value: hoveredAction)

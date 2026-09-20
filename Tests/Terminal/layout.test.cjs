@@ -19,6 +19,7 @@ function setup() {
     constructor() { this.cols = 80; this.rows = 24; this.fits = 0; terminals.push(this); }
     loadAddon(addon) { addon.term = this; }
     open(el) { this.el = el; }
+    registerLinkProvider() { return { dispose() {} }; }
     onData() {} onBinary() {} focus() {} dispose() {}
   }
   class FitAddon {
@@ -35,9 +36,8 @@ function setup() {
     get: (_, name) => ({ postMessage: body => messages.push({ name, ...body }) })
   }) } };
   vm.runInNewContext(script, {
-    window, document: { getElementById: () => host, createElement: () => {
-      const el = element(); elements.push(el); return el;
-    } },
+    window, document: { getElementById: () => host, addEventListener() {},
+      createElement: () => { const el = element(); elements.push(el); return el; } },
     Terminal, FitAddon: { FitAddon }, SearchAddon: { SearchAddon: class {} },
     WebglAddon: { WebglAddon: class { onContextLoss() {} dispose() {} } },
     ResizeObserver: class { constructor(callback) { resize = callback; } observe() {} },

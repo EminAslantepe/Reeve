@@ -134,7 +134,7 @@ struct SessionRow: View {
     private var background: some View {
         RoundedRectangle(cornerRadius: 6)
             .fill(fillColor)
-            .stroke(strokeColor, lineWidth: 1)
+            .strokeBorder(strokeColor, lineWidth: Theme.hairline)
     }
 
     private var fillColor: Color {
@@ -144,8 +144,8 @@ struct SessionRow: View {
 
     private var strokeColor: Color {
         isAlarm ? Theme.wait.opacity(0.26)
-            : isFocused ? Theme.primary.opacity(0.5)
-            : isHovered ? Theme.primary.opacity(0.28) : .clear
+            : isFocused ? Theme.focusRule
+            : isHovered ? Theme.rule : .clear
     }
 }
 

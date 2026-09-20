@@ -41,6 +41,11 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     var onReady: ((String) -> Void)?
     /// Kullanıcı bir panoya tıkladı — klavye odağı o panele geçmeli.
     var onFocusPane: ((UUID) -> Void)?
+    /// Terminalde dosya yoluna benzeyen metinler: "bunlar gerçekten var mı?"
+    /// Cevap `resolved(_:_:)` ile geri gider; yalnızca var olanların altı çizilir.
+    var onProbePaths: ((UUID, Int, [String]) -> Void)?
+    /// Kullanıcı terminaldeki bir dosya yoluna tıkladı. Satır 0 ise belirtilmemiş.
+    var onOpenPath: ((UUID, String, Int) -> Void)?
 
     private var isReady = false
     private var queued: [String] = []
@@ -54,7 +59,8 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
 
-        for name in ["input", "resize", "created", "ready", "focusPane"] {
+        for name in ["input", "resize", "created", "ready", "focusPane",
+                     "resolvePaths", "openPath"] {
             controller.add(self, name: name)
         }
         webView.navigationDelegate = self
@@ -86,6 +92,20 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     }
 
     func clearFind() { run("reeveClearFind()") }
+
+    /// Yol yoklamasının cevabı: `{aday: var mı}`.
+    func resolved(_ request: Int, _ results: [String: Bool]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: results),
+              var json = String(data: data, encoding: .utf8) else { return }
+        // JSON'da serbest olan bu iki karakter JS string'inde satır sonu sayılıyor
+        // ve çağrıyı bozuyor; yolda geçerlerse kaçırılmaları gerekiyor.
+        json = json.replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+                   .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
+        run("reeveResolved(\(request), \(json))")
+    }
+
+    /// Oturum `cd` etti: göreli yolların karşılığı değişti, önbellek düşsün.
+    func resetLinks(_ id: UUID) { run("reeveResetLinks('\(id.uuidString)')") }
 
     private func jsString(_ text: String) -> String? {
         guard let data = try? JSONSerialization.data(withJSONObject: [text]),
@@ -136,6 +156,19 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
                let id = (body["id"] as? String).flatMap(UUID.init(uuidString:)) {
                 onFocusPane?(id)
             }
+
+        case "resolvePaths":
+            guard let body = message.body as? [String: Any],
+                  let id = (body["id"] as? String).flatMap(UUID.init(uuidString:)),
+                  let request = body["req"] as? Int,
+                  let paths = body["paths"] as? [String] else { return }
+            onProbePaths?(id, request, paths)
+
+        case "openPath":
+            guard let body = message.body as? [String: Any],
+                  let id = (body["id"] as? String).flatMap(UUID.init(uuidString:)),
+                  let path = body["path"] as? String else { return }
+            onOpenPath?(id, path, body["line"] as? Int ?? 0)
 
         case "input":
             guard let body = message.body as? [String: Any],

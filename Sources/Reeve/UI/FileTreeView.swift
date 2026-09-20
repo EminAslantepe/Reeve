@@ -5,7 +5,8 @@ import SwiftUI
 /// Sidebar'ın hemen sağındaki dosya paneli: seçili oturumun çalışma dizini ve
 /// altındakiler.
 ///
-/// Kök, seçili oturumun `cwd`'sini izliyor — oturum değişince panel de değişiyor.
+/// Kök, seçili oturumun canlı dizinini izliyor — oturum değişince de `cd`
+/// yapıldığında da panel oraya taşınıyor.
 /// Alt dizinler **açıldıklarında** okunuyor; `.git`, `.build`, `node_modules`
 /// gibi ağır klasörler kapalı durdukları sürece hiç taranmıyor.
 @MainActor
@@ -113,8 +114,8 @@ struct FileTreeView: View {
             }
         }
         .background(Theme.sidebar)
-        .onAppear { model.setRoot(store.selected?.cwd) }
-        .onChange(of: store.selected?.cwd) { _, cwd in model.setRoot(cwd) }
+        .onAppear { model.setRoot(store.selected?.currentCwd) }
+        .onChange(of: store.selected?.currentCwd) { _, cwd in model.setRoot(cwd) }
     }
 
     private var header: some View {
@@ -202,7 +203,7 @@ private struct FileTreeRow: View {
                     .frame(width: 9)
                 Image(systemName: entry.isDirectory ? "folder" : "doc")
                     .font(.system(size: 10.5))
-                    .foregroundStyle(entry.isDirectory ? Theme.agent : Theme.ink3)
+                    .foregroundStyle(entry.isDirectory ? Theme.ink2 : Theme.ink3)
                     .frame(width: 13)
                 Text(entry.name)
                     .font(.system(size: 12))

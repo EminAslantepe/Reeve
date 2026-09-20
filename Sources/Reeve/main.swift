@@ -35,8 +35,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     private var gitSummary: (added: Int, removed: Int)?
     private var gitSummaryCwd: String?
     private var gitSummaryAt = Date.distantPast
-    private weak var gitButton: NSButton?
-    private weak var gitChip: NSView?
+    private weak var gitSummaryView: NSHostingView<GitSummaryButton>?
+    private var gitSummaryWidth: NSLayoutConstraint?
     private var inspectorItem: NSSplitViewItem!
 
     private var tier = SidebarTier.stored
@@ -71,6 +71,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
             if session.hasTerminal { self.host.select(session.id) }
             self.refreshContent()
             self.refreshInspector()
+            self.refreshGitSummary()
         }
         store.onDispose = { [weak self] session in
             self?.host.dispose(session.id)
@@ -86,6 +87,45 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         host.onFocusPane = { [weak self] id in
             guard let self, let pane = self.store.pane(of: id) else { return }
             self.store.focusPane(pane)
+        }
+
+        // Terminalde geçen dosya yollarının altı çiziliyor; hangilerinin gerçek
+        // dosya olduğuna burada karar veriliyor (bkz. `TerminalPath`).
+        host.onProbePaths = { [weak self] id, request, paths in
+            guard let self else { return }
+            let cwd = self.session(id)?.currentCwd
+            var found: [String: Bool] = [:]
+            var unresolved: [String] = []
+            for path in paths {
+                if TerminalPath.resolve(path, in: cwd) != nil { found[path] = true }
+                else { unresolved.append(path) }
+            }
+            guard !unresolved.isEmpty, let cwd else {
+                self.host.resolved(request, found)
+                return
+            }
+            // Kalanlar yalın ad olabilir ("main.swift"); repo dizininde aranıyorlar.
+            self.gitProbe.files(in: cwd) { [weak self] index in
+                guard let self else { return }
+                for path in unresolved {
+                    found[path] = index.flatMap { TerminalPath.locate(path, in: $0) } != nil
+                }
+                self.host.resolved(request, found)
+            }
+        }
+
+        host.onOpenPath = { [weak self] id, path, line in
+            guard let self else { return }
+            let cwd = self.session(id)?.currentCwd
+            if let url = TerminalPath.resolve(path, in: cwd) {
+                self.viewer.show(file: url, line: line)
+                return
+            }
+            guard let cwd else { return }
+            self.gitProbe.files(in: cwd) { [weak self] index in
+                guard let index, let url = TerminalPath.locate(path, in: index) else { return }
+                self?.viewer.show(file: url, line: line)
+            }
         }
 
         host.onReady = { [weak self] renderer in
@@ -133,8 +173,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         processTree.onUpdate = { [weak self] trees in
             self?.store.applyChildren(trees)
         }
+        // `cd` çalışma dizinini taşıdı: git özeti ve inceleme paneli yoklamanın
+        // bir sonraki turunu beklemeden oraya bakmalı.
         processTree.onCwd = { [weak self] cwds in
-            self?.store.applyCwds(cwds)
+            guard let self else { return }
+            // Göreli yollar taşınan dizine göre çözülüyor: link önbelleği düşsün.
+            for id in self.store.applyCwds(cwds) { self.host.resetLinks(id) }
+            self.refreshGitSummary()
+            self.refreshInspector()
         }
         // Katman 3 - model, token, maliyet ve konusma adimlari.
         transcript.onUpdate = { [weak self] usages in
@@ -228,21 +274,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         store.sessions.first { $0.id == id }
     }
 
+
     @objc func jumpToWaiting(_ sender: Any?) {
         store.selectFirstWaiting()
     }
 
     // MARK: - İnceleme paneli
 
+    /// Araç çubuğundaki düğme ve menü aynı yere bakıyor: panel o klasörün
+    /// değişikliklerini gösteriyorsa ikinci basış kapatıyor.
     @objc func showGitDiff(_ sender: Any?) {
-        guard let cwd = store.selected?.cwd else { return }
-        viewer.showChanges(cwd: cwd, probe: gitProbe)
+        guard let cwd = store.selected?.currentCwd else { return }
+        viewer.toggleChanges(cwd: cwd, probe: gitProbe)
     }
 
-    /// Yoklamaya takılı ama kısılmış: cwd değiştiyse hemen, değişmediyse
+    /// Kabuğun **canlı** dizinine bakıyor: `cd` sonrası özet de oraya taşınıyor.
+    /// Yoklamaya takılı ama kısılmış: dizin değiştiyse hemen, değişmediyse
     /// en fazla dört saniyede bir.
     private func refreshGitSummary() {
-        guard let cwd = store.selected?.cwd else {
+        guard let cwd = store.selected?.currentCwd else {
             gitSummary = nil
             gitSummaryCwd = nil
             applyGitSummary()
@@ -250,6 +300,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         }
         let stale = Date().timeIntervalSince(gitSummaryAt) > 4
         guard cwd != gitSummaryCwd || stale else { return }
+        if cwd != gitSummaryCwd {
+            gitSummary = nil
+            applyGitSummary()
+        }
         gitSummaryCwd = cwd
         gitSummaryAt = Date()
         gitProbe.changes(in: cwd) { [weak self] changes in
@@ -262,19 +316,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     }
 
     private func applyGitSummary() {
-        guard let gitButton else { return }
-        guard let summary = gitSummary else {
-            gitButton.attributedTitle = NSAttributedString(string: "")
-            gitChip?.isHidden = true
-            return
+        guard let gitSummaryView else { return }
+        gitSummaryView.rootView = makeGitSummaryButton()
+        gitSummaryView.invalidateIntrinsicContentSize()
+        gitSummaryWidth?.constant = max(128, gitSummaryView.intrinsicContentSize.width)
+    }
+
+    private func makeGitSummaryButton() -> GitSummaryButton {
+        GitSummaryButton(added: gitSummary?.added ?? 0,
+                         removed: gitSummary?.removed ?? 0) { [weak self] in
+            self?.showGitDiff(nil)
         }
-        gitChip?.isHidden = false
-        let text = NSMutableAttributedString()
-        text.append(NSAttributedString(string: "+\(summary.added)",
-                                       attributes: [.foregroundColor: NSColor(Theme.diffAdd)]))
-        text.append(NSAttributedString(string: "  −\(summary.removed)",
-                                       attributes: [.foregroundColor: NSColor(Theme.diffDel)]))
-        gitButton.attributedTitle = text
     }
 
     @objc func toggleFiles(_ sender: Any?) {
@@ -298,10 +350,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
             inspector.worktrees = []
             return
         }
-        gitProbe.changes(in: session.cwd) { [weak self] changes in
+        gitProbe.changes(in: session.currentCwd) { [weak self] changes in
             self?.inspector.changes = changes
         }
-        gitProbe.worktrees(in: session.cwd) { [weak self] trees in
+        gitProbe.worktrees(in: session.currentCwd) { [weak self] trees in
             // Tek worktree varsa o zaten repo'nun kendisi, göstermeye değmez.
             self?.inspector.worktrees = trees.count > 1 ? trees : []
         }
@@ -509,7 +561,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
 
     @objc func newSession(_ sender: Any?) {
         guard sheet == nil else { return }
-        let cwd = store.selected?.cwd ?? defaultCwd
+        let cwd = store.selected?.currentCwd ?? defaultCwd
         let view = NewSessionSheet(
             cwd: cwd,
             name: SessionFactory.name(for: cwd, existing: store.sessions.map(\.name)),
@@ -807,7 +859,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
             item.label = "Sidebar"
 
         case Self.filesItemID:
-            let button = toolbarButton(Self.toolbarImage(["wrench.adjustable", "wrench"]),
+            let button = toolbarButton(Self.toolbarImage(["folder"]),
                                        toggle: true, action: #selector(toggleFiles(_:)))
             button.toolTip = "Dosya panelini aç / kapat (⌘⌥E)"
             button.state = (filesItem?.isCollapsed == false) ? .on : .off
@@ -816,32 +868,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
             item.label = "Dosyalar"
 
         case Self.gitItemID:
-            let button = NSButton(title: "", target: self, action: #selector(showGitDiff(_:)))
-            button.isBordered = false
-            button.image = Self.toolbarImage(["plusminus"])
-            button.imagePosition = .imageLeading
-            button.contentTintColor = NSColor(Theme.ink2)
-            button.font = .monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
-            button.toolTip = "Çalışma ağacındaki değişiklikler — tıkla, dosyaları sağda aç"
-            gitButton = button
-
-            // Koyu yuvarlak çip. Düğmenin kendi zemini yok (`isBordered = false`),
-            // yoksa sistem bezeli çipin rengini bastırırdı.
-            let chip = NSView()
-            chip.wantsLayer = true
-            chip.layer?.backgroundColor = NSColor(Theme.control).cgColor
-            chip.layer?.cornerRadius = 6
-            chip.translatesAutoresizingMaskIntoConstraints = false
-            button.translatesAutoresizingMaskIntoConstraints = false
-            chip.addSubview(button)
+            let summary = NSHostingView(rootView: makeGitSummaryButton())
+            summary.sizingOptions = [.intrinsicContentSize]
+            summary.translatesAutoresizingMaskIntoConstraints = false
+            let width = summary.widthAnchor.constraint(equalToConstant: 128)
             NSLayoutConstraint.activate([
-                button.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 8),
-                button.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -8),
-                button.topAnchor.constraint(equalTo: chip.topAnchor, constant: 3),
-                button.bottomAnchor.constraint(equalTo: chip.bottomAnchor, constant: -3),
+                width,
+                summary.heightAnchor.constraint(equalToConstant: 32),
             ])
-            item.view = chip
-            gitChip = chip
+            item.view = summary
+            gitSummaryView = summary
+            gitSummaryWidth = width
             item.label = "Değişiklikler"
             applyGitSummary()
 

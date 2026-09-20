@@ -5,6 +5,7 @@ final class SidebarSplitView: NSSplitView {
     var onSidebarResizeEnded: ((CGFloat) -> Void)?
 
     override var dividerColor: NSColor { NSColor(Theme.rule) }
+    override var dividerThickness: CGFloat { Theme.hairline }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)

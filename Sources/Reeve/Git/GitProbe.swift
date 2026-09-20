@@ -28,6 +28,17 @@ struct Worktree: Identifiable, Equatable {
     var name: String { (path as NSString).lastPathComponent }
 }
 
+/// Repo'daki dosyaların adı → yol dizini.
+///
+/// Terminalde yalın yazılmış dosya adlarını ("main.swift") bağlayabilmek için:
+/// çalışma dizinine göre çözülemiyorlar, repo içinde aranmaları gerekiyor.
+struct FileIndex {
+    /// Repo kökünün tam yolu.
+    let root: String
+    /// Dosya adı → repo köküne göre yollar. Aynı ad birden fazla yerde olabilir.
+    let byName: [String: [String]]
+}
+
 /// Klasör başına git durumunu okur. Üç ucuz komut + kısa ömürlü önbellek;
 /// hook'lara, transcript'e, libproc'a bağlı değil.
 final class GitProbe {
@@ -37,6 +48,7 @@ final class GitProbe {
 
     private let queue = DispatchQueue(label: "io.reeve.git")
     private var states: [String: GitState] = [:]
+    private var indexes: [String: (index: FileIndex, at: Date)] = [:]
     private var gitPath: String?
 
     init() {
@@ -70,7 +82,12 @@ final class GitProbe {
             guard let self else { return }
             var args = ["diff", "HEAD"]
             // `--` ayracı şart: yol bir dal adıyla çakışırsa git yolu değil dalı seçerdi.
-            if let path { args += ["--", path] }
+            //
+            // `:(top,literal)` öneki de şart: `--numstat` yolları repo KÖKÜNE göre
+            // veriyor, pathspec ise komutun çalıştığı dizine göre çözülüyor. Alt
+            // dizinde açılmış bir oturumda ikisi uyuşmuyor ve fark boş çıkıyordu.
+            // `literal`, adında `*` ya da `[` geçen dosyanın glob sanılmasını önler.
+            if let path { args += ["--", ":(top,literal)" + path] }
             var raw = self.run(args, in: cwd) ?? ""
             if raw.count > limit {
                 raw = String(raw.prefix(limit)) + "\n\n… fark çıktısı kısaltıldı"
@@ -95,6 +112,41 @@ final class GitProbe {
             }
             DispatchQueue.main.async { completion(out) }
         }
+    }
+
+    /// Repo'nun dosya listesi. Takip edilenlerin yanında yoksayılmayan yeni
+    /// dosyalar da var: az önce yaratılmış bir dosyanın adı da tıklanabilsin.
+    func files(in cwd: String, completion: @escaping (FileIndex?) -> Void) {
+        queue.async { [weak self] in
+            let index = self?.index(for: cwd)
+            DispatchQueue.main.async { completion(index) }
+        }
+    }
+
+    /// Liste nadiren değişiyor; kısa ömürlü önbellek her fare gezinişinde
+    /// `git ls-files` çalıştırmayı önlüyor.
+    private func index(for cwd: String) -> FileIndex? {
+        guard let root = run(["rev-parse", "--show-toplevel"], in: cwd)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !root.isEmpty else { return nil }
+        if let cached = indexes[root], Date().timeIntervalSince(cached.at) < 15 {
+            return cached.index
+        }
+        // Kökten çalıştırmak şart: `ls-files` alt dizinden çağrıldığında yalnızca
+        // o dizinin altını listeliyor.
+        guard let raw = run(["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+                            in: root) else { return nil }
+        var byName: [String: [String]] = [:]
+        var seen = 0
+        for entry in raw.split(separator: "\0") where !entry.isEmpty {
+            let path = String(entry)
+            byName[(path as NSString).lastPathComponent, default: []].append(path)
+            seen += 1
+            if seen >= 40_000 { break }   // devasa repoda liste ucu açık kalmasın
+        }
+        let index = FileIndex(root: root, byName: byName)
+        indexes[root] = (index, Date())
+        return index
     }
 
     /// `claude --worktree` her ajana kendi dalını veriyor; biriken worktree'leri
@@ -150,9 +202,15 @@ final class GitProbe {
         process.executableURL = URL(fileURLWithPath: gitPath)
         process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-        // Repo dışında çalışırken git üst dizinlere tırmanmasın.
+        // Repo dışında çalışırken git üst dizinlere tırmanmasın; tavan ev dizini.
+        //
+        // Tavanı `cwd`'nin bir üstü yapmak ölçüldü ve yanlıştı: repo kökünün
+        // ALTINDAKİ her dizinde git "repo yok" diyordu, yani alt klasöre `cd`
+        // eden oturumda ne özet ne de fark listesi doluyordu. Ev dizini tavanken
+        // alt dizinler kökü buluyor, ev dizininin kendisi bir repoysa (dotfiles)
+        // o da yalnızca orada görünüyor, altındaki alakasız klasörlere sızmıyor.
         var env = ProcessInfo.processInfo.environment
-        env["GIT_CEILING_DIRECTORIES"] = (cwd as NSString).deletingLastPathComponent
+        env["GIT_CEILING_DIRECTORIES"] = FileManager.default.homeDirectoryForCurrentUser.path
         env["GIT_OPTIONAL_LOCKS"] = "0"
         process.environment = env
 

@@ -6,15 +6,15 @@
       content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'">
 <link rel="stylesheet" href="vendor/xterm.css">
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #121215; }
-  /* Panel ayracı: panolar arasında 1 px boşluk bırakıyoruz, altından host görünüyor. */
-  #host { position: absolute; inset: 0; background: #31313a; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0b0b; }
+  /* Panel ayracı: panolar arasında 0.5 px boşluk bırakıyoruz, altından host görünüyor. */
+  #host { position: absolute; inset: 0; background: #2b2b2b; }
   /* Her oturum kendi katmanında. Gizlemek için display:none DEĞİL visibility
      kullanıyoruz: display:none eleman boyutunu sıfırlar, o zaman ne term.open()
      doğru kurulur ne de fit() ölçebilir (UI.md D2). visibility:hidden ölçüyü korur. */
   .pane {
     position: absolute; top: 0; bottom: 0; left: 0; width: 100%;
-    box-sizing: border-box; background: #121215;
+    box-sizing: border-box; background: #0b0b0b;
   }
   /* Kenar boşluğu panoya padding olarak VERİLEMİYOR: FitAddon ölçtüğü ebeveynin
      yüksekliğini padding'i düşmeden okuyor (WebKit border-box değerini
@@ -22,8 +22,8 @@
      Boşluğu konumlandırmayla veriyoruz; ölçülen kutu = gerçekten kullanılabilir alan. */
   .pane > .inner { position: absolute; top: 6px; bottom: 6px; left: 8px; right: 8px; }
   .pane[data-active="0"] { visibility: hidden; }
-  .xterm-viewport::-webkit-scrollbar { width: 9px; }
-  .xterm-viewport::-webkit-scrollbar-thumb { background: #31313a; border-radius: 5px; }
+  .xterm-viewport::-webkit-scrollbar { width: 6px; }
+  .xterm-viewport::-webkit-scrollbar-thumb { background: #2b2b2b; border-radius: 5px; }
   .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
 </style>
 </head>
@@ -68,18 +68,18 @@
     cursorBlink: true,
     scrollback: 10000,
     // xterm'in varsayılanı 1: her tekerlek olayı tek satır, trackpad'de
-    // ağır kalıyor. Alt basılıyken devreye giren fastScrollSensitivity (5)
-    // varsayılanında bırakıldı.
-    scrollSensitivity: 3,
+    // ağır kalıyor. 3'ten %30 artırıldı. Alt basılıyken devreye giren
+    // fastScrollSensitivity (5) varsayılanında bırakıldı.
+    scrollSensitivity: 3.9,
     macOptionIsMeta: true,
     allowProposedApi: true,
-    // "Center Ajan Konsolu" mockup'ının terminal paleti.
+    // Nötr yüzeyler Theme.swift ile eşleşir; ANSI durum renkleri korunur.
     theme: {
-      background: '#121215', foreground: '#e6e6ea',
-      cursor: '#7aa7ff', cursorAccent: '#121215',
-      selectionBackground: '#2f3040',
-      black: '#121215',   red: '#ef6a5e',   green: '#6fcf97', yellow: '#e8b04a',
-      blue: '#7aa7ff',    magenta: '#c99bf5', cyan: '#6fd3cf', white: '#e6e6ea',
+      background: '#0b0b0b', foreground: '#ececec',
+      cursor: '#cccccc', cursorAccent: '#0b0b0b',
+      selectionBackground: '#303030',
+      black: '#0b0b0b',   red: '#ef6a5e',   green: '#6fcf97', yellow: '#e8b04a',
+      blue: '#7aa7ff',    magenta: '#c99bf5', cyan: '#6fd3cf', white: '#ececec',
       brightBlack: '#6e6e7c', brightRed: '#ff8a7e', brightGreen: '#8fe0b3',
       brightYellow: '#f5c76a', brightBlue: '#9dbcff', brightMagenta: '#dcb6ff',
       brightCyan: '#8fe3df', brightWhite: '#ffffff'
@@ -111,6 +111,142 @@
     return true;
   }
 
+  // ---- Terminaldeki dosya yolları ----
+  //
+  // Claude çıktısında sürekli `Sources/Reeve/UI/Theme.swift:43` gibi yollar
+  // geçiyor; tıklanınca sağdaki görüntüleyicide o satırda açılsınlar.
+  //
+  // Altını çizmeden önce Swift'e "bu dosya gerçekten var mı" diye soruyoruz.
+  // Terminalde dosya adına BENZEYEN bir sürü şey geçiyor ("Faz 1.5", "2.1");
+  // hepsini link yapmak arayüzü çöpe çevirirdi. Cevaplar pano başına
+  // önbellekte, yoksa her fare hareketinde Swift'e gidilirdi.
+
+  // Link yalnızca ⌘ basılıyken canlanıyor — editörlerdeki alışkanlık. Çıplak
+  // tıklama terminalin kendisine kalıyor: metin seçmek ve TUI'ye tıklamak
+  // bozulmuyor (xterm tıklamayı engellemiyor, sadece `activate` çağırıyor).
+  //
+  // Altı çizgiyi anlık açıp kapatabiliyoruz: xterm bir link hover edilince onun
+  // `decorations` nesnesini setter'lı bir nesneyle değiştiriyor; ona yazmak
+  // görünümü hemen günceller. Bu yüzden yalnızca hover edilen linke dokunuyoruz.
+  let metaHeld = false;
+  let hoveredLink = null;
+
+  function setMeta(on) {
+    if (metaHeld === on) return;
+    metaHeld = on;
+    if (!hoveredLink) return;
+    hoveredLink.decorations.pointerCursor = on;
+    hoveredLink.decorations.underline = on;
+  }
+
+  document.addEventListener("keydown", (e) => setMeta(e.metaKey), true);
+  document.addEventListener("keyup", (e) => setMeta(e.metaKey), true);
+  // Pencere odağı giderken ⌘'ın bırakıldığını göremiyoruz.
+  window.addEventListener("blur", () => setMeta(false));
+
+  const PATH_RE = /[~./]?[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.[A-Za-z0-9_]{1,12}(?::\d+(?::\d+)?)?/g;
+  const linkCache = new Map();    // paneID -> Map(aday -> var mı)
+  const pendingProbe = new Map(); // istek no -> cevabı bekleyen fonksiyon
+  let probeSeq = 0;
+
+  // Sarılmış satırlar tek mantıksal satır sayılıyor: uzun bir yol satır sonunda
+  // ikiye bölündüğünde de bütün olarak yakalansın. `translateToString(false)`
+  // sağdaki boşlukları koruyor, böylece her parça tam `cols` karakter oluyor ve
+  // karakter sırasını satır/sütuna çevirmek basit bölme işlemine iniyor.
+  function logicalLine(term, index) {
+    const buf = term.buffer.active;
+    let start = index;
+    while (start > 0) {
+      const line = buf.getLine(start);
+      if (!line || !line.isWrapped) break;
+      start--;
+    }
+    let text = "";
+    let at = start;
+    for (;;) {
+      const line = buf.getLine(at);
+      if (!line) break;
+      text += line.translateToString(false);
+      const next = buf.getLine(at + 1);
+      if (!next || !next.isWrapped) break;
+      at++;
+      if (at - start > 12) break;   // aşırı uzun sarmalarda tarama büyümesin
+    }
+    return { text: text, startY: start };
+  }
+
+  function scan(term, row) {
+    const line = logicalLine(term, row - 1);
+    if (!line.text) return [];
+    const cols = term.cols;
+    const out = [];
+    PATH_RE.lastIndex = 0;
+    let m;
+    while ((m = PATH_RE.exec(line.text)) !== null) {
+      const token = m[0];
+      const parts = token.match(/^(.+?)(?::(\d+))?(?::(\d+))?$/);
+      if (!parts) continue;
+      const from = m.index, to = m.index + token.length - 1;
+      out.push({
+        token: token,
+        path: parts[1],
+        line: parts[2] ? parseInt(parts[2], 10) : 0,
+        range: {
+          start: { x: (from % cols) + 1, y: line.startY + Math.floor(from / cols) + 1 },
+          end:   { x: (to % cols) + 1,   y: line.startY + Math.floor(to / cols) + 1 }
+        }
+      });
+      if (out.length >= 24) break;   // tek satırda bundan fazlası zaten gürültü
+    }
+    return out;
+  }
+
+  // Uzun oturumda önbellek sınırsız büyümesin: tavanı aşınca en eski girdiler
+  // düşüyor (Map ekleme sırasını koruyor). Düşen aday yeniden sorulur, o kadar.
+  function trim(cache) {
+    if (cache.size <= 4000) return;
+    for (const key of cache.keys()) {
+      cache.delete(key);
+      if (cache.size <= 3000) break;
+    }
+  }
+
+  function probePaths(paneID, tokens) {
+    return new Promise(function (done) {
+      let cache = linkCache.get(paneID);
+      if (!cache) { cache = new Map(); linkCache.set(paneID, cache); }
+      const ask = [];
+      for (const t of tokens) if (!cache.has(t) && ask.indexOf(t) < 0) ask.push(t);
+      if (!ask.length) { done(cache); return; }
+
+      const req = ++probeSeq;
+      // Cevap gelmezse (Swift tarafı meşgul/kapanıyor) söz askıda kalmasın:
+      // link çizilmez, bir dahaki gezinişte yeniden sorulur.
+      const timer = setTimeout(function () {
+        pendingProbe.delete(req);
+        done(cache);
+      }, 2000);
+      pendingProbe.set(req, function (results) {
+        clearTimeout(timer);
+        for (const t of ask) cache.set(t, results[t] === true);
+        trim(cache);
+        done(cache);
+      });
+      send("resolvePaths", { id: paneID, req: req, paths: ask });
+    });
+  }
+
+  window.reeveResolved = function (req, results) {
+    const fn = pendingProbe.get(req);
+    if (!fn) return;
+    pendingProbe.delete(req);
+    fn(results || {});
+  };
+
+  // Oturum `cd` etti: göreli yollar artık başka bir klasöre işaret ediyor,
+  // eski cevaplar çöp.
+  window.reeveResetLinks = function (id) { linkCache.delete(id); };
+
   // ---- Swift → JS ----
 
   window.reeveCreate = function (id) {
@@ -133,6 +269,33 @@
     term.loadAddon(search);
     term.open(inner);                       // eleman ölçülebilir: gizliyken de boyutu var
 
+    term.registerLinkProvider({
+      provideLinks: function (row, callback) {
+        const found = scan(term, row);
+        if (!found.length) { callback(undefined); return; }
+        probePaths(id, found.map(f => f.token)).then(function (cache) {
+          const links = [];
+          for (const f of found) {
+            if (cache.get(f.token) !== true) continue;
+            const link = {
+              range: f.range,
+              text: f.token,
+              decorations: { pointerCursor: metaHeld, underline: metaHeld },
+              hover: function () { hoveredLink = link; },
+              leave: function () { if (hoveredLink === link) hoveredLink = null; },
+              activate: function (event) {
+                if (event && !event.metaKey) return;   // tıklama terminalin
+                send("openPath", { id: id, path: f.path, line: f.line });
+              }
+            };
+            links.push(link);
+          }
+          callback(links.length ? links : undefined);
+        });
+      }
+    });
+
+    el.addEventListener("mousemove", (e) => setMeta(e.metaKey), true);
     el.addEventListener("mousedown", () => send("focusPane", { id: id }), true);
     term.onData(d => send("input", { id: id, b64: toB64(encoder.encode(d)) }));
     term.onBinary(d => {
@@ -156,8 +319,10 @@
   // bağlamak WebGL bağlamını düşürürdü. Gizli panolar 0. slotun ölçüsünü alıyor,
   // görünür olduklarında zaten doğru boyutta oluyorlar (UI.md D9).
   function box(el, leftPercent, widthPercent) {
-    el.style.left = "calc(" + leftPercent + "% + " + (leftPercent > 0 ? 1 : 0) + "px)";
-    el.style.width = "calc(" + widthPercent + "% - " + (widthPercent < 100 ? 1 : 0) + "px)";
+    const insetLeft = leftPercent > 0 ? 0.25 : 0;
+    const insetRight = leftPercent + widthPercent < 99.999 ? 0.25 : 0;
+    el.style.left = "calc(" + leftPercent + "% + " + insetLeft + "px)";
+    el.style.width = "calc(" + widthPercent + "% - " + (insetLeft + insetRight) + "px)";
   }
 
   function place() {

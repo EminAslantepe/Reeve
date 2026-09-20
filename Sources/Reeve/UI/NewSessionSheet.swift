@@ -154,7 +154,7 @@ struct NewSessionSheet: View {
         RoundedRectangle(cornerRadius: 6)
             .fill(Theme.control)
             .overlay(RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Theme.rule, lineWidth: 1))
+                .strokeBorder(Theme.rule, lineWidth: Theme.hairline))
     }
 
     // MARK: - Yardımcılar

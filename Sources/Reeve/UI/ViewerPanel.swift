@@ -16,6 +16,14 @@ final class ViewerModel {
         case changes(cwd: String)
         /// Tek bir dosyanın farkı; listeden gelinir, geri dönülebilir.
         case fileDiff(cwd: String, path: String)
+
+        /// Panel şu anda bu klasörün git değişikliklerini mi gösteriyor.
+        func showsChanges(in cwd: String) -> Bool {
+            switch self {
+            case .changes(let current), .fileDiff(let current, _): return current == cwd
+            case .empty, .file: return false
+            }
+        }
     }
 
     /// Bir klasör ve altındaki değişen dosyalar.
@@ -44,23 +52,43 @@ final class ViewerModel {
     private(set) var lines: [Line] = []
     private(set) var groups: [ChangeGroup] = []
     private(set) var notice: String?
+    /// Vurgulanıp kaydırılacak satır (1 tabanlı). Terminalde `dosya.swift:73`
+    /// tıklandığında doluyor.
+    private(set) var highlight: Int?
+    /// Her açılışta artıyor. Aynı dosyanın aynı satırı yeniden istendiğinde de
+    /// görünümün kaydırmayı tetiklemesi gerekiyor; `highlight` tek başına
+    /// değişmediği için sinyal olarak yetmiyor.
+    private(set) var highlightToken = 0
     @ObservationIgnored private var probe: GitProbe?
     var isVisible = false
 
     @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
 
-    func show(file url: URL) {
+    func show(file url: URL, line: Int? = nil) {
         mode = .file(url)
         title = url.lastPathComponent
         subtitle = url.deletingLastPathComponent().path
         load(url)
+        highlight = (line ?? 0) > 0 ? line : nil
+        highlightToken &+= 1
         reveal()
+    }
+
+    /// Araç çubuğundaki düğme: aynı klasörün değişiklikleri zaten ekrandaysa
+    /// ikinci basış paneli kapatıyor.
+    func toggleChanges(cwd: String, probe: GitProbe) {
+        if isVisible, mode.showsChanges(in: cwd) {
+            close()
+        } else {
+            showChanges(cwd: cwd, probe: probe)
+        }
     }
 
     /// Değişen dosyaların klasöre göre gruplandığı liste — tek dev fark bloğu yerine.
     func showChanges(cwd: String, probe: GitProbe) {
         self.probe = probe
         mode = .changes(cwd: cwd)
+        highlight = nil
         title = "Değişiklikler"
         subtitle = cwd
         lines = []
@@ -77,6 +105,7 @@ final class ViewerModel {
     func showFileDiff(cwd: String, path: String) {
         guard let probe else { return }
         mode = .fileDiff(cwd: cwd, path: path)
+        highlight = nil
         title = (path as NSString).lastPathComponent
         subtitle = path
         lines = []
@@ -211,15 +240,9 @@ struct ViewerPanel: View {
     private var header: some View {
         HStack(spacing: 6) {
             if case .fileDiff = model.mode {
-                Button {
+                PanelIconButton(symbol: "chevron.left", label: "Değişiklik listesine dön") {
                     model.backToChanges()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.ink2)
                 }
-                .buttonStyle(.plain)
-                .help("Değişiklik listesine dön")
             }
             Image(systemName: icon)
                 .font(.system(size: 11))
@@ -239,15 +262,9 @@ struct ViewerPanel: View {
                 }
             }
             Spacer(minLength: 4)
-            Button {
+            PanelIconButton(symbol: "xmark", label: "Paneli kapat") {
                 model.close()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.ink3)
             }
-            .buttonStyle(.plain)
-            .help("Paneli kapat")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -311,27 +328,59 @@ struct ViewerPanel: View {
         .monospacedDigit()
     }
 
+    /// Kod satırları.
+    ///
+    /// İki eksenli `ScrollView` içeriğe **panel genişliğini** öneriyor, sonsuzu
+    /// değil. Eskiden satırda hem metin hem `Spacer` esnekti; SwiftUI kalan
+    /// genişliği ikiye bölüp kodu yarım alana sıkıştırıyor ve sardırıyordu.
     private var content: some View {
-        ScrollView([.vertical, .horizontal]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(model.lines) { line in
-                    HStack(spacing: 8) {
-                        Text("\(line.id + 1)")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(Theme.ink3.opacity(0.7))
-                            .frame(width: 34, alignment: .trailing)
-                        Text(line.text.isEmpty ? " " : line.text)
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundStyle(color(for: line.kind))
-                            .textSelection(.enabled)
-                        Spacer(minLength: 0)
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView([.vertical, .horizontal]) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.lines) { line in
+                            row(line, width: geometry.size.width)
+                        }
                     }
-                    .padding(.vertical, 0.5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(background(for: line.kind))
+                    .padding(.vertical, 4)
+                }
+                // `initial: true` panel zaten açıkken gelen dosyayı da kapsıyor.
+                .onChange(of: model.highlightToken, initial: true) { _, _ in
+                    // LazyVStack satırları daha kurulmadan kaydırmak boşa gidiyor;
+                    // bir tur bekletiyoruz.
+                    DispatchQueue.main.async { jump(proxy) }
                 }
             }
-            .padding(.vertical, 4)
+        }
+    }
+
+    /// Tek satır. Metin `fixedSize` ile doğal genişliğinde duruyor — uzun satır
+    /// sarmıyor, yatay kaydırma bunun için var. Satırın kendisi en az panel
+    /// kadar geniş: vurgu ve fark renkleri sağ kenara kadar gidiyor.
+    private func row(_ line: ViewerModel.Line, width: CGFloat) -> some View {
+        HStack(spacing: 8) {
+            Text("\(line.id + 1)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Theme.ink3.opacity(0.7))
+                .frame(width: 34, alignment: .trailing)
+            Text(line.text.isEmpty ? " " : line.text)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(color(for: line.kind))
+                .fixedSize(horizontal: true, vertical: false)
+                .textSelection(.enabled)
+        }
+        .padding(.trailing, 12)
+        .padding(.vertical, 0.5)
+        .frame(minWidth: width, alignment: .leading)
+        .background(background(for: line))
+        .id(line.id)
+    }
+
+    /// Vurgulu satırı ortaya getirir — üste yapıştırmak çevresini görünmez kılardı.
+    private func jump(_ proxy: ScrollViewProxy) {
+        guard let line = model.highlight, model.lines.indices.contains(line - 1) else { return }
+        withAnimation(.easeOut(duration: 0.18)) {
+            proxy.scrollTo(line - 1, anchor: .center)
         }
     }
 
@@ -345,8 +394,9 @@ struct ViewerPanel: View {
         }
     }
 
-    private func background(for kind: ViewerModel.Line.Kind) -> Color {
-        switch kind {
+    private func background(for line: ViewerModel.Line) -> Color {
+        if model.highlight == line.id + 1 { return Theme.primary.opacity(0.16) }
+        switch line.kind {
         case .added:   return Theme.diffAdd.opacity(0.10)
         case .removed: return Theme.diffDel.opacity(0.10)
         default:       return .clear

@@ -48,7 +48,7 @@ struct InspectorView: View {
         .frame(width: 300)
         .background(Theme.sidebar)
         .overlay(alignment: .leading) {
-            Rectangle().fill(Theme.rule).frame(width: 1)
+            Rectangle().fill(Theme.rule).frame(width: Theme.hairline)
         }
     }
 
@@ -281,7 +281,7 @@ private struct Section<Content: View>: View {
                     .font(.system(size: 12, weight: .semibold))
                     .kerning(0.7)
                     .foregroundStyle(Theme.ink3)
-                Rectangle().fill(Theme.ruleSoft).frame(height: 1)
+                Rectangle().fill(Theme.ruleSoft).frame(height: Theme.hairline)
             }
             .padding(.horizontal, 12)
             .padding(.top, 14)

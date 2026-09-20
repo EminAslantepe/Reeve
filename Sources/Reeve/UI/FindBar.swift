@@ -38,7 +38,7 @@ struct FindBar: View {
             RoundedRectangle(cornerRadius: 7)
                 .fill(Theme.paletteBG)
                 .overlay(RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(Theme.paletteBorder, lineWidth: 1)))
+                    .strokeBorder(Theme.paletteBorder, lineWidth: Theme.hairline)))
         .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         .onAppear { focused = true }
     }

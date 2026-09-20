@@ -113,7 +113,11 @@ final class SessionStore {
         }
     }
 
-    var uniqueCwds: [String] { Array(Set(sessions.map(\.cwd))) }
+    /// Yoklama hem açılış hem canlı dizini kapsıyor: gruplama açılış dizinine
+    /// bakıyor, durum çubuğu ve git özeti `cd` ile taşınılan dizine.
+    var uniqueCwds: [String] {
+        Array(Set(sessions.flatMap { [$0.cwd, $0.currentCwd] }))
+    }
 
     // MARK: - Katman 1 uygulanıyor
 
@@ -186,11 +190,20 @@ final class SessionStore {
             .map { ($0.id, $0.claudeSessionID, $0.cwd) }
     }
 
-    func applyCwds(_ cwds: [pid_t: String]) {
+    /// Dizini gerçekten değişen oturumları döndürüyor: terminaldeki göreli
+    /// yolların karşılığı da değiştiği için çağıran tarafın link önbelleğini
+    /// düşürmesi gerekiyor.
+    @discardableResult
+    func applyCwds(_ cwds: [pid_t: String]) -> [Session.ID] {
+        var moved: [Session.ID] = []
         for session in sessions {
             guard let pid = session.pid, let path = cwds[pid] else { continue }
-            if session.liveCwd != path { session.liveCwd = path }
+            if session.liveCwd != path {
+                session.liveCwd = path
+                moved.append(session.id)
+            }
         }
+        return moved
     }
 
     /// Terminale `cd` yazdırıyoruz — kabuğun dizinini dışarıdan değiştirmenin

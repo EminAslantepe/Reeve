@@ -19,13 +19,13 @@ struct SessionPalette: View {
         let split = partition(ranked)
         return VStack(alignment: .leading, spacing: 0) {
             field
-            Rectangle().fill(Theme.rule).frame(height: 1)
+            Rectangle().fill(Theme.rule).frame(height: Theme.hairline)
             results(split)
-            Rectangle().fill(Theme.rule).frame(height: 1)
+            Rectangle().fill(Theme.rule).frame(height: Theme.hairline)
             footer
         }
         .background(Theme.paletteBG)
-        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Theme.paletteBorder, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Theme.paletteBorder, lineWidth: Theme.hairline))
         .clipShape(RoundedRectangle(cornerRadius: 11))
         .frame(width: 460)
         .onAppear { focused = true }

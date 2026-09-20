@@ -24,13 +24,13 @@ struct ExternalSessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Rectangle().fill(Theme.ruleSoft).frame(height: 1)
+            Rectangle().fill(Theme.ruleSoft).frame(height: Theme.hairline)
             if session.turns.isEmpty {
                 empty
             } else {
                 conversation
             }
-            Rectangle().fill(Theme.ruleSoft).frame(height: 1)
+            Rectangle().fill(Theme.ruleSoft).frame(height: Theme.hairline)
             actions
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

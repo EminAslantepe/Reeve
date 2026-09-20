@@ -18,33 +18,35 @@ struct StatusBarView: View {
                 ScrollView(.horizontal, showsIndicators: false) { usage }
             }
         }
-        .font(.system(size: 12))
+        .font(.system(size: 11))
         .monospacedDigit()
         .foregroundStyle(Theme.ink2)
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(width: availableWidth)
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.statusbar)
         .overlay(alignment: .top) {
-            Rectangle().fill(Theme.rule).frame(height: 1)
+            Rectangle().fill(Theme.rule).frame(height: Theme.hairline)
         }
     }
 
     private var location: some View {
         HStack(spacing: 8) {
-            Image(systemName: "folder")
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.ink3)
             Text(store.selected?.displayCwd ?? "Bir oturum seçin")
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if let selected = store.selected, let git = store.gitStates[selected.cwd] {
+            if let selected = store.selected, let git = store.gitStates[selected.currentCwd] {
                 Label(git.branch, systemImage: "arrow.triangle.branch")
                     .lineLimit(1)
                     .help("\(git.dirty) değiştirilmiş dosya · \(git.ahead) gönderilmemiş commit")
             }
         }
-        .help(store.selected?.cwd ?? "")
+        .help(store.selected?.currentCwd ?? "")
     }
 
     private var usage: some View {
@@ -65,7 +67,7 @@ struct StatusBarView: View {
         HStack(spacing: 6) {
             Text(label).foregroundStyle(Theme.ink2)
             Text(value)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.ink)
         }
         .accessibilityElement(children: .combine)
