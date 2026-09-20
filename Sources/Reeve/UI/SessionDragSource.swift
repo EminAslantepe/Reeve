@@ -7,6 +7,7 @@ struct SessionDragSource<Preview: View>: NSViewRepresentable {
     let store: SessionStore
     let drag: DragState
     var actionArea: CGSize = .zero
+    var actionEdge: VerticalEdge = .top
     var onHover: (Bool) -> Void = { _ in }
     @ViewBuilder var preview: () -> Preview
 
@@ -15,6 +16,7 @@ struct SessionDragSource<Preview: View>: NSViewRepresentable {
     func updateNSView(_ view: SessionDragView, context: Context) {
         view.sessionID = session.id
         view.actionArea = actionArea
+        view.actionEdge = actionEdge
         view.onHover = onHover
         view.onSelect = { store.select(session.id) }
         view.onBegin = { drag.begin(session.id, store: store) }
@@ -32,6 +34,7 @@ struct SessionDragSource<Preview: View>: NSViewRepresentable {
 final class SessionDragView: NSView, NSDraggingSource {
     var sessionID = UUID()
     var actionArea: CGSize = .zero
+    var actionEdge: VerticalEdge = .top
     var onHover: ((Bool) -> Void)?
     private var hoverTracking: NSTrackingArea?
     var onSelect: (() -> Void)?
@@ -44,7 +47,8 @@ final class SessionDragView: NSView, NSDraggingSource {
         // Sağ tıklama, SwiftUI satırının mevcut bağlam menüsüne gider.
         if NSApp.currentEvent?.type == .rightMouseDown { return nil }
         let local = convert(point, from: superview)
-        let controls = NSRect(x: bounds.maxX - actionArea.width, y: bounds.minY,
+        let controls = NSRect(x: bounds.maxX - actionArea.width,
+                              y: actionEdge == .top ? bounds.minY : bounds.maxY - actionArea.height,
                               width: actionArea.width, height: actionArea.height)
         if controls.contains(local) { return nil }
         return super.hitTest(point)

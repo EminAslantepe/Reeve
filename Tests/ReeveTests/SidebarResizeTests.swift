@@ -4,6 +4,31 @@ import XCTest
 @testable import Reeve
 
 final class SidebarResizeTests: XCTestCase {
+    func testCompactControlsDoNotCoverTheDragBody() async {
+        await MainActor.run {
+            _ = NSApplication.shared
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+            let source = SessionDragView(frame: NSRect(x: 10, y: 10, width: 48.4, height: 54))
+            container.addSubview(source)
+            source.actionArea = CGSize(width: 48.4, height: 24)
+            source.actionEdge = .bottom
+
+            for x: CGFloat in [4, 24.2, 44.4] {
+                for y: CGFloat in [4, 16, 28] {
+                    let point = source.convert(NSPoint(x: x, y: y), to: container)
+                    XCTAssertTrue(source.hitTest(point) === source,
+                                  "Kartın gövdesi hover sırasında da sürüklenebilmeli")
+                }
+                let control = source.convert(NSPoint(x: x, y: 42), to: container)
+                XCTAssertNil(source.hitTest(control), "Alt kontroller tıklamayı alabilmeli")
+            }
+            source.actionArea = .zero
+            let bottom = source.convert(NSPoint(x: 24.2, y: 42), to: container)
+            XCTAssertTrue(source.hitTest(bottom) === source,
+                          "Kontroller gizliyken bütün kart sürüklenebilmeli")
+        }
+    }
+
     func testNativeDividerCanShrinkToRailAndExpandAgain() async {
         await MainActor.run {
             _ = NSApplication.shared

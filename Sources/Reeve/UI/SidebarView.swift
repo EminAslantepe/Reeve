@@ -26,7 +26,7 @@ struct SidebarView: View {
             Group {
                 switch SidebarTier.fitting(width: geometry.size.width) {
                 case .wide:   wide
-                case .narrow: narrow
+                case .narrow: narrow(width: geometry.size.width)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -91,7 +91,7 @@ struct SidebarView: View {
 
     // MARK: - Dar
 
-    private var narrow: some View {
+    private func narrow(width: CGFloat) -> some View {
         VStack(spacing: 0) {
             newSessionButton(compact: true)
                 .padding(.top, 12)
@@ -104,7 +104,7 @@ struct SidebarView: View {
                             Rectangle().fill(Theme.rule)
                                 .frame(width: 20, height: 1).padding(.vertical, 2)
                         case .session(let session, let tag):
-                            chipView(session, tag: tag)
+                            chipView(session, tag: tag, width: max(48.4, width - 15.6))
                         }
                     }
                 }
@@ -116,25 +116,25 @@ struct SidebarView: View {
         }
     }
 
-    private func chipView(_ session: Session, tag: String) -> some View {
+    private func chipView(_ session: Session, tag: String, width: CGFloat) -> some View {
         let hovered = hoveredSessionID == session.id && !drag.isActive
         return SessionChip(session: session, tag: tag,
                     selected: store.pane(of: session.id) != nil,
-                    focused: store.selectedID == session.id, isHovered: hovered)
+                    focused: store.selectedID == session.id, isHovered: hovered, width: width)
             .contentShape(RoundedRectangle(cornerRadius: 9))
             .opacity(drag.sessionID == session.id ? 0 : 1)
             .animation(nil, value: drag.sessionID)
             .overlay { dragPlaceholder(for: session) }
             .overlay {
                 SessionDragSource(session: session, store: store, drag: drag,
-                                  actionArea: hovered ? CGSize(width: 44, height: 21) : .zero,
+                                  actionArea: hovered ? CGSize(width: width, height: 24) : .zero,
+                                  actionEdge: .bottom,
                                   onHover: { setHover($0, for: session) }) {
-                    SessionChip(session: session, tag: tag, selected: true, focused: true)
+                    SessionChip(session: session, tag: tag, selected: true, focused: true, width: width)
                 }
             }
-            .overlay(alignment: .topTrailing) {
+            .overlay(alignment: .bottom) {
                 rowActions(session, compact: true)
-                    .padding(2)
                     .opacity(hovered ? 1 : 0)
                     .allowsHitTesting(hovered)
                     .accessibilityHidden(!hovered)
@@ -538,23 +538,36 @@ private struct SessionDragPreview: View {
     }
 }
 
-/// Kompakt oturum ve sürükleme önizlemesi aynı kareyi kullanır.
+/// Dar kartlar ayırıcıyla birlikte genişler; kontroller gövdenin altında kalır.
 private struct SessionChip: View {
     let session: Session
     let tag: String
     let selected: Bool
     let focused: Bool
     var isHovered = false
+    var width: CGFloat = 48.4
+
+    private var nameProgress: CGFloat { min(1, max(0, (width - 64) / 40)) }
 
     var body: some View {
-        Text(tag)
-            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+        HStack(spacing: 0) {
+            Text(tag)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .minimumScaleFactor(0.7)
+                .frame(width: 48.4)
+            Text(session.name)
+                .font(.system(size: 11.5, weight: .medium))
+                .truncationMode(.tail)
+                .frame(width: max(0, width - 56.4), alignment: .leading)
+                .clipped()
+                .opacity(nameProgress)
+        }
             .lineLimit(1)
-            .minimumScaleFactor(0.7)
             .foregroundStyle(focused ? Theme.ink : Theme.ink2)
-            .offset(y: 4)
-            .padding(.horizontal, 4)
-            .frame(width: 44, height: 44)
+            .frame(width: width, height: 26, alignment: .leading)
+            .padding(.top, 4)
+            // Alan hover öncesinde de ayrılır; kontroller belirince liste oynamaz.
+            .padding(.bottom, 24)
             .background(selected ? Theme.selection : isHovered ? Theme.choiceOn : Theme.control,
                         in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9)
@@ -564,7 +577,6 @@ private struct SessionChip: View {
                     ClaudeMark().fill(Theme.primary)
                         .frame(width: 9, height: 9)
                         .padding(4)
-                        .opacity(isHovered ? 0 : 1)
                 }
             }
             .overlay(alignment: .topTrailing) {
@@ -572,7 +584,6 @@ private struct SessionChip: View {
                     .scaleEffect(0.65)
                     .frame(width: 10, height: 10)
                     .padding(3)
-                    .opacity(isHovered ? 0 : 1)
             }
     }
 }
@@ -589,20 +600,21 @@ private struct SessionActionBar: View {
     private enum Action: Hashable { case menu, close }
 
     var body: some View {
-        HStack(spacing: 1) {
+        HStack(spacing: compact ? 0 : 1) {
             Menu {
                 Button("Yeniden adlandır", action: onRename)
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: compact ? 10 : 11, weight: .bold))
-                    .foregroundStyle(hoveredAction == .menu ? Theme.ink : Theme.ink2)
-                    .frame(width: compact ? 21 : 25, height: compact ? 21 : 25)
-                    .background(hoveredAction == .menu ? Theme.choiceOn : .clear,
-                                in: RoundedRectangle(cornerRadius: 4))
+                    .frame(width: compact ? 20 : 25, height: compact ? 20 : 25)
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
-            .tint(Theme.ink2)
+            .foregroundStyle(hoveredAction == .menu ? Theme.ink : Theme.ink2)
+            .background(hoveredAction == .menu ? Theme.selection : .clear,
+                        in: RoundedRectangle(cornerRadius: 4))
+            .contentShape(Rectangle())
             .fixedSize()
             .onHover { hoveredAction = $0 ? .menu : nil }
             .help("Oturum seçenekleri")
@@ -612,7 +624,7 @@ private struct SessionActionBar: View {
                 Image(systemName: "xmark")
                     .font(.system(size: compact ? 9 : 10, weight: .bold))
                     .foregroundStyle(hoveredAction == .close ? Theme.error : Theme.ink2)
-                    .frame(width: compact ? 21 : 25, height: compact ? 21 : 25)
+                    .frame(width: compact ? 20 : 25, height: compact ? 20 : 25)
                     .background(hoveredAction == .close ? Theme.error.opacity(0.22) : .clear,
                                 in: RoundedRectangle(cornerRadius: 4))
             }
