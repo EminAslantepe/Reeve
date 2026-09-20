@@ -828,6 +828,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     private static let gitItemID = NSToolbarItem.Identifier("gitSummary")
 
     private static let titleItemID = NSToolbarItem.Identifier("windowTitle")
+    private static let ambientItemID = NSToolbarItem.Identifier("shootingStar")
 
     /// Sidebar düğmesi solda, panele bakan tarafta. Panel sayısı araç çubuğundan
     /// çıkarıldı: oturumu sidebar'dan terminale sürüklemek daha doğrudan.
@@ -835,7 +836,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     /// Pencere başlığı gizlenip araç çubuğuna taşındı; aksi halde macOS başlığı
     /// sola koyup bütün araç çubuğu öğelerini sağa itiyor.
     private var toolbarLayout: [NSToolbarItem.Identifier] {
-        [Self.sidebarItemID, Self.filesItemID, Self.titleItemID, .flexibleSpace, Self.gitItemID]
+        [Self.sidebarItemID, Self.filesItemID, Self.titleItemID, Self.ambientItemID, Self.gitItemID]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -888,6 +889,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
             label.textColor = NSColor(Theme.ink2)
             item.view = label
             item.label = "Reeve"
+
+        case Self.ambientItemID:
+            return ShootingStarView.toolbarItem(identifier: identifier)
 
         default:
             return nil
