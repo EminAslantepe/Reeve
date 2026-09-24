@@ -2,19 +2,21 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="dark">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'">
-<link rel="stylesheet" href="vendor/xterm.css">
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0b0b; }
-  /* Panel ayracı: panolar arasında 0.5 px boşluk bırakıyoruz, altından host görünüyor. */
-  #host { position: absolute; inset: 0; background: #2b2b2b; }
+  html, body { color-scheme: dark; margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0b0b; }
+  /* Yeni terminal içeriği çizilene kadar host da terminal renginde kalmalı. */
+  #host { position: absolute; inset: 0; background: #0b0b0b; }
   /* Her oturum kendi katmanında. Gizlemek için display:none DEĞİL visibility
      kullanıyoruz: display:none eleman boyutunu sıfırlar, o zaman ne term.open()
      doğru kurulur ne de fit() ölçebilir (UI.md D2). visibility:hidden ölçüyü korur. */
   .pane {
     position: absolute; top: 0; bottom: 0; left: 0; width: 100%;
     box-sizing: border-box; background: #0b0b0b;
+    /* Panolar arasındaki 0.5 px boşluğu doldurur; dış kenar viewport'ta kırpılır. */
+    box-shadow: 0.5px 0 0 #2b2b2b;
   }
   /* Kenar boşluğu panoya padding olarak VERİLEMİYOR: FitAddon ölçtüğü ebeveynin
      yüksekliğini padding'i düşmeden okuyor (WebKit border-box değerini
@@ -26,6 +28,7 @@
   .xterm-viewport::-webkit-scrollbar-thumb { background: #2b2b2b; border-radius: 5px; }
   .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
 </style>
+<link rel="stylesheet" href="vendor/xterm.css">
 </head>
 <body>
 <div id="host"></div>

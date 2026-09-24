@@ -49,6 +49,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         wire()
         buildMenu()
         buildWindow()
+        prepareWindowForDisplay()
         host.load()
     }
 
@@ -771,8 +772,44 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         window.center()
         window.contentView?.layoutSubtreeIfNeeded()
         sidebarSplitView.setPosition(tier.width, ofDividerAt: 0)
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func prepareWindowForDisplay() {
+        host.prepareForDisplay { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let image):
+                // Hazır görüntü, pencere ekrana alınırken WebKit'in ilk kompozit
+                // karesini de örter. Canlı görünüm güncellenince kaldırılır.
+                let cover = NSImageView()
+                cover.image = image
+                cover.imageScaling = .scaleAxesIndependently
+                cover.translatesAutoresizingMaskIntoConstraints = false
+                let webView = self.host.webView
+                webView.superview?.addSubview(cover)
+                NSLayoutConstraint.activate([
+                    cover.leadingAnchor.constraint(equalTo: webView.leadingAnchor),
+                    cover.trailingAnchor.constraint(equalTo: webView.trailingAnchor),
+                    cover.topAnchor.constraint(equalTo: webView.topAnchor),
+                    cover.bottomAnchor.constraint(equalTo: webView.bottomAnchor)
+                ])
+                self.window.contentView?.layoutSubtreeIfNeeded()
+                self.window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                self.host.prepareForDisplay { [weak self] _ in
+                    cover.removeFromSuperview()
+                    self?.host.focus()
+                }
+            case .failure(let error):
+                let alert = NSAlert()
+                alert.messageText = "Terminal açılamadı"
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "Çık")
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+                NSApp.terminate(nil)
+            }
+        }
     }
 
     private func buildToolbar() -> NSToolbar {

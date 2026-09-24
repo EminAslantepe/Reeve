@@ -1,6 +1,16 @@
 import AppKit
 import WebKit
 
+/// WebKit, macOS'ta her updateLayer çağrısında zemini controlBackgroundColor'a
+/// döndürür. underPageBackgroundColor bu yerel katmanı yönetmez. Yeni web
+/// içeriği çizilene kadar açığa çıkan alan da terminal renginde kalmalı.
+final class TerminalWebView: WKWebView {
+    override func updateLayer() {
+        super.updateLayer()
+        layer?.backgroundColor = NSColor(Theme.terminal).cgColor
+    }
+}
+
 /// Kaynakların nerede olduğunu çözer.
 /// `.app` içinde `Contents/Resources`, `swift run` sırasında `Bundle.module`.
 ///
@@ -50,13 +60,15 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     private var isReady = false
     private var queued: [String] = []
     private var backlog: [UUID: Data] = [:]
+    private var navigationFinished = false
+    private var pendingPresentation: ((Result<NSImage, Error>) -> Void)?
 
     override init() {
         let controller = WKUserContentController()
         let config = WKWebViewConfiguration()
         config.userContentController = controller
 
-        webView = WKWebView(frame: .zero, configuration: config)
+        webView = TerminalWebView(frame: .zero, configuration: config)
         super.init()
 
         for name in ["input", "resize", "created", "ready", "focusPane",
@@ -70,7 +82,32 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     }
 
     func load() {
+        navigationFinished = false
         webView.loadFileURL(Res.page, allowingReadAccessTo: Res.root)
+    }
+
+    /// Sayfa yüklenip bekleyen terminal komutları işlendiğinde ilk görüntüyü üretir.
+    /// Pencerenin görünür olması veya keyfi bir açılış gecikmesi gerekmez.
+    func prepareForDisplay(_ completion: @escaping (Result<NSImage, Error>) -> Void) {
+        pendingPresentation = completion
+        capturePendingPresentation()
+    }
+
+    private func capturePendingPresentation() {
+        guard isReady, navigationFinished, let completion = pendingPresentation else { return }
+        pendingPresentation = nil
+        webView.window?.contentView?.layoutSubtreeIfNeeded()
+        // Daha önce gönderilen create/layout/select komutlarının arkasında bir bariyer.
+        webView.evaluateJavaScript("void 0") { [weak self] _, error in
+            guard let self else { return }
+            if let error { completion(.failure(error)); return }
+            let configuration = WKSnapshotConfiguration()
+            configuration.afterScreenUpdates = true
+            self.webView.takeSnapshot(with: configuration) { image, error in
+                if let image { completion(.success(image)) }
+                else { completion(.failure(error ?? WKError(.unknown))) }
+            }
+        }
     }
 
     // MARK: - Swift → JS
@@ -141,6 +178,7 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
             queued.removeAll()
             for js in pending { webView.evaluateJavaScript(js) }
             onReady?(renderer)
+            capturePendingPresentation()
 
         case "created":
             guard let (id, size) = parse(message.body) else { return }
@@ -191,6 +229,25 @@ final class TerminalHost: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     }
 
     // MARK: - Ağa çıkış yok
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        navigationFinished = true
+        capturePendingPresentation()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        failPendingPresentation(error)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        failPendingPresentation(error)
+    }
+
+    private func failPendingPresentation(_ error: Error) {
+        let completion = pendingPresentation
+        pendingPresentation = nil
+        completion?(.failure(error))
+    }
 
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationAction: WKNavigationAction,
