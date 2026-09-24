@@ -425,6 +425,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         SidebarTier.stored = next
         let width = next == .narrow ? next.width : expandedSidebarWidth
         sidebarSplitView.setPosition(SidebarTier.settledWidth(width), ofDividerAt: 0)
+        sidebarButton?.state = next == .wide ? .on : .off
     }
 
     private func settleSidebar(at width: CGFloat) {
@@ -433,6 +434,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         SidebarTier.stored = tier
         if tier == .wide { expandedSidebarWidth = settled }
         sidebarSplitView.setPosition(settled, ofDividerAt: 0)
+        sidebarButton?.state = tier == .wide ? .on : .off
     }
 
     private func makeSidebar() -> SidebarView {
@@ -825,24 +827,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
 
     /// Araç çubuğu simgeleri aynı görsel ağırlıkta dursun: yapılandırma verilmezse
     /// her glif kendi doğal boyutunda çiziliyor ve yoğun olanlar iri görünüyor.
-    private static let toolbarSymbol = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+    private static let toolbarSymbol = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
 
     /// Açık/kapalı durumunu gösteren düğme; durumu menüden de değişebildiği için
     /// referansı tutuyoruz.
     private weak var filesButton: NSButton?
+    private weak var sidebarButton: NSButton?
 
-    /// Düz `NSToolbarItem.image` ne hover ne de basılı durum çiziyor. Gerçek bir
-    /// `NSButton` ikisini de bedavaya veriyor: `pushOnPushOff` açıkken kabarık
-    /// zemin bırakıyor, kenarlık imleç üzerine gelince beliriyor.
-    private func toolbarButton(_ image: NSImage?, toggle: Bool, action: Selector) -> NSButton {
-        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
-        button.setButtonType(toggle ? .pushOnPushOff : .momentaryPushIn)
-        button.bezelStyle = .texturedRounded
-        button.isBordered = true
+    private func toolbarButton(_ image: NSImage?, action: Selector) -> NSButton {
+        let button = PanelToolbarButton(image: image ?? NSImage(), target: self, action: action)
+        button.setButtonType(.pushOnPushOff)
+        button.isBordered = false
         button.imagePosition = .imageOnly
-        // Şablon simge varsayılanda ikincil etiket renginde çiziliyor; bir tik açıyoruz.
-        button.contentTintColor = NSColor(Theme.ink2)
-        button.frame = NSRect(x: 0, y: 0, width: 30, height: 22)
+        button.contentTintColor = NSColor(Theme.ink)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 28),
+            button.heightAnchor.constraint(equalToConstant: 24)
+        ])
         return button
     }
 
@@ -857,9 +859,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
         return nil
     }
 
-    private static let sidebarItemID = NSToolbarItem.Identifier("sidebarTier")
-
-    private static let filesItemID = NSToolbarItem.Identifier("filesPanel")
+    private static let panelsItemID = NSToolbarItem.Identifier("panelControls")
 
 
     private static let gitItemID = NSToolbarItem.Identifier("gitSummary")
@@ -873,7 +873,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
     /// Pencere başlığı gizlenip araç çubuğuna taşındı; aksi halde macOS başlığı
     /// sola koyup bütün araç çubuğu öğelerini sağa itiyor.
     private var toolbarLayout: [NSToolbarItem.Identifier] {
-        [Self.sidebarItemID, Self.filesItemID, Self.titleItemID, Self.ambientItemID, Self.gitItemID]
+        [Self.panelsItemID, Self.titleItemID, Self.ambientItemID, Self.gitItemID]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -889,21 +889,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSToolbarDelegate {
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         let item = NSToolbarItem(itemIdentifier: identifier)
         switch identifier {
-        case Self.sidebarItemID:
-            let button = toolbarButton(Self.toolbarImage(["sidebar.left"]),
-                                       toggle: false, action: #selector(cycleSidebar(_:)))
-            button.toolTip = "Sidebar'ı daralt / genişlet (⌘S)"
-            item.view = button
-            item.label = "Sidebar"
+        case Self.panelsItemID:
+            let sidebar = toolbarButton(Self.toolbarImage(["sidebar.left"]), action: #selector(cycleSidebar(_:)))
+            sidebar.toolTip = "Sidebar'ı daralt / genişlet (⌘S)"
+            sidebar.setAccessibilityLabel("Yan panel")
+            sidebar.state = tier == .wide ? .on : .off
+            sidebarButton = sidebar
 
-        case Self.filesItemID:
-            let button = toolbarButton(Self.toolbarImage(["folder"]),
-                                       toggle: true, action: #selector(toggleFiles(_:)))
-            button.toolTip = "Dosya panelini aç / kapat (⌘⌥E)"
-            button.state = (filesItem?.isCollapsed == false) ? .on : .off
-            filesButton = button
-            item.view = button
-            item.label = "Dosyalar"
+            let files = toolbarButton(Self.toolbarImage(["folder"]), action: #selector(toggleFiles(_:)))
+            files.toolTip = "Dosya panelini aç / kapat (⌘⌥E)"
+            files.setAccessibilityLabel("Dosya paneli")
+            files.state = (filesItem?.isCollapsed == false) ? .on : .off
+            filesButton = files
+
+            let controls = NSStackView(views: [sidebar, files])
+            controls.orientation = .horizontal
+            controls.alignment = .centerY
+            controls.spacing = 2
+            item.view = controls
+            item.label = "Paneller"
 
         case Self.gitItemID:
             let summary = NSHostingView(rootView: makeGitSummaryButton())
